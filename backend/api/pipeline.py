@@ -12,7 +12,7 @@ import multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 # from config import WORKSPACE_DIR, DOWNSCALE_WIDTH, KEYFRAME_STRIDE, BASELINE_RATIO, LDI_LAYERS
 from status import StatusManager
-from models import depth_from_hf
+from models import depth_from_hf, create_local_depth_map
 from inpaint_api import sd_inpaint
 from video_io import extract_frames, probe_video, create_side_by_side
 from flow_utils import compute_flow_cv2, warp_image_with_flow, interpolate_occlusion_aware, forward_backward_consistency_mask
@@ -192,10 +192,12 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     frame_files = sorted(frames_down.glob("frame_*.png"))
     n_frames = len(frame_files)
     print(f"Total frames extracted: {n_frames}")
+    print(f"🔧 DEBUG: Frame extraction completed, moving to depth estimation")
     status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":10, "frames": n_frames})
 
     # Enhanced batch depth estimation with parallel processing
     print(f"Starting batch depth estimation for {n_frames} frames...")
+    print(f"🔧 DEBUG: About to start depth estimation process")
     depths = []
     batch_size = 12  # Reduced batch size for memory efficiency
     
@@ -239,7 +241,6 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
                 try:
                     # Convert numpy array to PIL for depth estimation
                     img_pil = Image.fromarray(img_array)
-                    from models import create_local_depth_map
                     depth_arr = create_local_depth_map(img_pil)
                     depth_arr = normalize_depth(depth_arr)
                     batch_depths.append(depth_arr)
