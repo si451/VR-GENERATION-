@@ -16,6 +16,8 @@ FFMPEG_BIN = os.getenv("FFMPEG_BIN", "ffmpeg")
 def find_ffmpeg():
     """Find FFmpeg binary with fallback options"""
     import shutil
+    import glob
+    import os
     
     # Try the environment variable first
     if FFMPEG_BIN and FFMPEG_BIN != "ffmpeg":
@@ -25,15 +27,25 @@ def find_ffmpeg():
     common_paths = [
         "ffmpeg",
         "/usr/bin/ffmpeg",
-        "/usr/local/bin/ffmpeg",
-        "/nix/store/*/bin/ffmpeg"
+        "/usr/local/bin/ffmpeg"
     ]
     
+    # Try Nix store paths
+    nix_paths = glob.glob("/nix/store/*/bin/ffmpeg")
+    common_paths.extend(nix_paths)
+    
     for path in common_paths:
-        if shutil.which(path):
+        if os.path.exists(path) and os.access(path, os.X_OK):
+            print(f"✅ Found FFmpeg at: {path}")
             return path
     
-    # If not found, return the default
+    # Try which command as last resort
+    which_path = shutil.which("ffmpeg")
+    if which_path:
+        print(f"✅ Found FFmpeg via which: {which_path}")
+        return which_path
+    
+    print("❌ FFmpeg not found in any common locations")
     return "ffmpeg"
 
 # Use the found FFmpeg binary

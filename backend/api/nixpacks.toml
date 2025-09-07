@@ -1,11 +1,19 @@
 [phases.setup]
-nixPkgs = ['ffmpeg']
+nixPkgs = ['ffmpeg', 'ffmpeg_5']
 
 [phases.install]
 cmds = ['pip install -r requirements.txt']
 
 [phases.build]
-cmds = ['echo "Build completed"', 'which ffmpeg', 'ffmpeg -version']
+cmds = [
+    'echo "Build completed"',
+    'echo "Checking FFmpeg installation..."',
+    'which ffmpeg || echo "FFmpeg not found in PATH"',
+    'find /nix/store -name "ffmpeg" -type f 2>/dev/null | head -5 || echo "No FFmpeg found in nix store"',
+    'ls -la /usr/bin/ffmpeg* 2>/dev/null || echo "No FFmpeg in /usr/bin"',
+    'ls -la /usr/local/bin/ffmpeg* 2>/dev/null || echo "No FFmpeg in /usr/local/bin"',
+    'export PATH="/nix/store/*/bin:$PATH" && which ffmpeg || echo "FFmpeg still not found after PATH update"'
+]
 
 [start]
-cmd = 'python -m uvicorn main:app --host 0.0.0.0 --port $PORT'
+cmd = 'export PATH="/nix/store/*/bin:$PATH" && python -m uvicorn main:app --host 0.0.0.0 --port $PORT'

@@ -25,15 +25,39 @@ app = FastAPI(title="VR180 Backend")
 async def startup_event():
     """Check system dependencies on startup"""
     import shutil
+    import glob
     
     print("🔧 Checking system dependencies...")
     
-    # Check FFmpeg
+    # Check FFmpeg with comprehensive search
+    ffmpeg_path = None
+    
+    # Try which command first
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path:
-        print(f"✅ FFmpeg found at: {ffmpeg_path}")
+        print(f"✅ FFmpeg found via which: {ffmpeg_path}")
+    else:
+        print("❌ FFmpeg not found in PATH")
+        
+        # Search in common locations
+        search_paths = [
+            "/usr/bin/ffmpeg",
+            "/usr/local/bin/ffmpeg"
+        ]
+        
+        # Search in Nix store
+        nix_paths = glob.glob("/nix/store/*/bin/ffmpeg")
+        search_paths.extend(nix_paths)
+        
+        for path in search_paths:
+            if os.path.exists(path) and os.access(path, os.X_OK):
+                ffmpeg_path = path
+                print(f"✅ FFmpeg found at: {path}")
+                break
+    
+    if ffmpeg_path:
         try:
-            result = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=10)
+            result = subprocess.run([ffmpeg_path, "-version"], capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 version_line = result.stdout.split('\n')[0]
                 print(f"✅ FFmpeg version: {version_line}")
@@ -42,11 +66,24 @@ async def startup_event():
         except Exception as e:
             print(f"⚠️ FFmpeg check failed: {e}")
     else:
-        print("❌ FFmpeg not found in PATH")
+        print("❌ FFmpeg not found in any location")
         print("Available binaries:")
-        for path in ["/usr/bin", "/usr/local/bin", "/nix/store"]:
+        for path in ["/usr/bin", "/usr/local/bin"]:
             if os.path.exists(path):
                 print(f"  {path}: {os.listdir(path)[:5]}...")
+        
+        # Check Nix store
+        nix_bin_dirs = glob.glob("/nix/store/*/bin")
+        if nix_bin_dirs:
+            print(f"  Nix store bin directories found: {len(nix_bin_dirs)}")
+            for bin_dir in nix_bin_dirs[:3]:  # Show first 3
+                try:
+                    files = os.listdir(bin_dir)
+                    ffmpeg_files = [f for f in files if 'ffmpeg' in f.lower()]
+                    if ffmpeg_files:
+                        print(f"    {bin_dir}: {ffmpeg_files}")
+                except:
+                    pass
     
     print("🚀 VR180 Backend startup completed")
 
