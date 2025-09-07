@@ -4,8 +4,8 @@ from PIL import Image
 from io import BytesIO
 from typing import Tuple
 import base64
-from .config import HF_API_URL, HUGGINGFACE_TOKEN, MODEL_INPAINT
-from .models import pil_to_bytes
+from config import HF_API_URL, HUGGINGFACE_TOKEN, MODEL_INPAINT
+from models import pil_to_bytes
 
 HEADERS = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"} if HUGGINGFACE_TOKEN else {}
 
