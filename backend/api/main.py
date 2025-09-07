@@ -52,7 +52,7 @@ def keep_alive_ping():
     while True:
         try:
             # Get the server URL from environment or use localhost
-            server_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000")
+            server_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8080")
             
             # Ping the health endpoint
             response = requests.get(f"{server_url}/health", timeout=10)
@@ -512,4 +512,4 @@ async def ws_job(websocket: WebSocket, job_id: str):
         conns.discard(websocket)
 
 if __name__ == "__main__":
-    uvicorn.run("api.main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), reload=True)
+    uvicorn.run("api.main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8080")), reload=True)
