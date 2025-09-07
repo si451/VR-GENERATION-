@@ -256,75 +256,76 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     start_time = time.time()
     max_processing_time = 1800  # 30 minutes max for depth estimation
     
-    for chunk_start in range(0, n_frames, chunk_size):
-        # Check for timeout
-        if time.time() - start_time > max_processing_time:
-            print(f"⚠️  Depth estimation timeout after {max_processing_time/60:.1f} minutes")
-            break
-        chunk_end = min(chunk_start + chunk_size, n_frames)
-        chunk_files = frame_files[chunk_start:chunk_end]
+    # Create tqdm progress bar for depth estimation
+    with tqdm(total=n_frames, desc="Depth Estimation", unit="frame", 
+              bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
         
-        print(f"Processing frames {chunk_start+1}-{chunk_end} of {n_frames}")
-        
-        # Load chunk of images
-        chunk_images = []
-        for fpath in chunk_files:
-            try:
-                img = Image.open(fpath).convert("RGB")
-                # Resize to target resolution if needed to save memory
-                if img.size[0] > DOWNSCALE_WIDTH:
-                    img = img.resize((DOWNSCALE_WIDTH, int(img.size[1] * DOWNSCALE_WIDTH / img.size[0])), Image.Resampling.LANCZOS)
-                chunk_images.append(np.array(img))
-            except Exception as e:
-                print(f"Failed to load frame {fpath}: {e}")
-                # Create dummy image
-                dummy_img = np.ones((DOWNSCALE_WIDTH//2, DOWNSCALE_WIDTH//2, 3), dtype=np.uint8) * 128
-                chunk_images.append(dummy_img)
-        
-        # Process this chunk
-        chunk_depths = []
-        for i, img_array in enumerate(chunk_images):
-            try:
-                # Convert numpy array to PIL for depth estimation
-                img_pil = Image.fromarray(img_array)
-                
-                # Use simpler depth estimation for reliability
-                depth_arr = create_local_depth_map(img_pil)
-                depth_arr = normalize_depth(depth_arr)
-                chunk_depths.append(depth_arr)
-                print(f"✅ Processed frame {chunk_start + i + 1}/{n_frames}")
-                
-                # Update progress every 10 frames to reduce API calls
-                if (i + 1) % 10 == 0:
-                    progress = 10 + int(40.0 * (chunk_start + i + 1) / n_frames)
-                    try:
-                        status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":progress})
-                    except Exception as e:
-                        print(f"⚠️  Status update failed: {e}")
+        for chunk_start in range(0, n_frames, chunk_size):
+            # Check for timeout
+            if time.time() - start_time > max_processing_time:
+                print(f"⚠️  Depth estimation timeout after {max_processing_time/60:.1f} minutes")
+                break
+            chunk_end = min(chunk_start + chunk_size, n_frames)
+            chunk_files = frame_files[chunk_start:chunk_end]
+            
+            # Load chunk of images
+            chunk_images = []
+            for fpath in chunk_files:
+                try:
+                    img = Image.open(fpath).convert("RGB")
+                    # Resize to target resolution if needed to save memory
+                    if img.size[0] > DOWNSCALE_WIDTH:
+                        img = img.resize((DOWNSCALE_WIDTH, int(img.size[1] * DOWNSCALE_WIDTH / img.size[0])), Image.Resampling.LANCZOS)
+                    chunk_images.append(np.array(img))
+                except Exception as e:
+                    print(f"Failed to load frame {fpath}: {e}")
+                    # Create dummy image
+                    dummy_img = np.ones((DOWNSCALE_WIDTH//2, DOWNSCALE_WIDTH//2, 3), dtype=np.uint8) * 128
+                    chunk_images.append(dummy_img)
+            
+            # Process this chunk
+            chunk_depths = []
+            for i, img_array in enumerate(chunk_images):
+                try:
+                    # Convert numpy array to PIL for depth estimation
+                    img_pil = Image.fromarray(img_array)
                     
-            except (Exception, TimeoutError) as e:
-                print(f"❌ Depth estimation failed for frame {chunk_start + i + 1}: {e}")
-                # Create a dummy depth map as fallback
-                dummy_depth = np.ones((img_array.shape[0], img_array.shape[1]), dtype=np.float32) * 0.5
-                chunk_depths.append(dummy_depth)
-        
-        depths.extend(chunk_depths)
-        
-        # Update progress
-        progress = 10 + int(40.0 * chunk_end / n_frames)
-        try:
-            status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":progress})
-        except Exception as e:
-            print(f"⚠️  Status update failed: {e}")
-        
-        # Force garbage collection after each chunk
-        del chunk_images, chunk_depths
-        gc.collect()
-        print(f"Completed chunk {chunk_start+1}-{chunk_end}, total depths: {len(depths)}")
-        
-        # Add a small delay to prevent overwhelming the system
-        import time
-        time.sleep(0.1)
+                    # Use simpler depth estimation for reliability
+                    depth_arr = create_local_depth_map(img_pil)
+                    depth_arr = normalize_depth(depth_arr)
+                    chunk_depths.append(depth_arr)
+                    
+                    # Update progress bar
+                    pbar.update(1)
+                    
+                    # Update status every 25 frames to reduce API calls
+                    if (chunk_start + i + 1) % 25 == 0:
+                        progress = 10 + int(40.0 * (chunk_start + i + 1) / n_frames)
+                        try:
+                            status_mgr.update(job_id, {
+                                "status":"running", 
+                                "stage":"depth_estimation", 
+                                "percent":progress,
+                                "message":f"Estimating depth maps... {chunk_start + i + 1}/{n_frames} frames"
+                            })
+                        except Exception as e:
+                            print(f"⚠️  Status update failed: {e}")
+                        
+                except (Exception, TimeoutError) as e:
+                    print(f"❌ Depth estimation failed for frame {chunk_start + i + 1}: {e}")
+                    # Create a dummy depth map as fallback
+                    dummy_depth = np.ones((img_array.shape[0], img_array.shape[1]), dtype=np.float32) * 0.5
+                    chunk_depths.append(dummy_depth)
+                    pbar.update(1)
+            
+            depths.extend(chunk_depths)
+            
+            # Force garbage collection after each chunk
+            del chunk_images, chunk_depths
+            gc.collect()
+            
+            # Add a small delay to prevent overwhelming the system
+            time.sleep(0.1)
     
     print(f"Depth estimation completed for {len(depths)} frames")
     # Free memory after depth estimation
@@ -336,7 +337,8 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     
     # Apply temporal smoothing with on-the-fly flow computation to save memory
     print("Applying temporal smoothing with on-the-fly flow computation...")
-    with tqdm(total=n_frames, desc="Temporal smoothing", unit="frame") as pbar:
+    with tqdm(total=n_frames, desc="Temporal Smoothing", unit="frame",
+              bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
         for i in range(n_frames):
             depth_cur = depths[i]
             prev_idx = max(i-1, 0)
@@ -379,7 +381,15 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
             # Update progress every 50 frames
             if i % 50 == 0:
                 progress = 52 + int(8.0 * i / n_frames)
-                status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":progress})
+                try:
+                    status_mgr.update(job_id, {
+                        "status":"running", 
+                        "stage":"temporal_smoothing", 
+                        "percent":progress,
+                        "message":f"Applying temporal smoothing... {i+1}/{n_frames} frames"
+                    })
+                except Exception as e:
+                    print(f"⚠️  Status update failed: {e}")
             
             # Ensure flow dimensions match depth dimensions
             if flow_cur_to_prev.shape[:2] != depth_cur.shape[:2]:
@@ -473,7 +483,8 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     
     # Process frames in batches for better performance
     ldi_batch_size = 4  # Reduced batch size for memory efficiency
-    with tqdm(total=n_frames, desc="Batch LDI & Inpainting", unit="frame") as pbar:
+    with tqdm(total=n_frames, desc="LDI & Inpainting", unit="frame",
+              bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
         for batch_start in range(0, n_frames, ldi_batch_size):
             batch_end = min(batch_start + ldi_batch_size, n_frames)
             
@@ -527,7 +538,15 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
             
             # Update status for the batch
             progress = 65 + int(20.0 * batch_end / n_frames)
-            status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":progress})
+            try:
+                status_mgr.update(job_id, {
+                    "status":"running", 
+                    "stage":"ldi_reprojection", 
+                    "percent":progress,
+                    "message":f"Creating VR180 views... {batch_end}/{n_frames} frames"
+                })
+            except Exception as e:
+                print(f"⚠️  Status update failed: {e}")
     
     print(f"LDI reprojection and inpainting completed")
 

@@ -153,12 +153,18 @@ export function UploadInterface() {
   const pollJobStatus = useCallback((jobId: string, fileId: string) => {
     let lastStage = "queued"
     let pollCount = 0
-    let maxIdlePolls = 20 // Stop polling after 20 idle checks (100 seconds)
+    let maxIdlePolls = 20 // Stop polling after 20 idle checks
+    let pollInterval = 2000 // Start with 2 seconds
+    let maxPollInterval = 10000 // Max 10 seconds between polls
+    let timeoutId: ReturnType<typeof setTimeout>
+    let isPolling = true
     
-    const pollInterval = setInterval(async () => {
+    const poll = async () => {
+      if (!isPolling) return
+      
       try {
         pollCount++
-        console.log(`Smart polling status for job ${jobId} (attempt ${pollCount})...`)
+        console.log(`Smart polling status for job ${jobId} (attempt ${pollCount}, interval: ${pollInterval}ms)...`)
         
         // Use stage transition endpoint for smart polling
         const response = await fetch(`${API_BASE_URL}/status/${jobId}/stage-transitions`)
@@ -225,19 +231,39 @@ export function UploadInterface() {
         
         // Stop polling if job is done or failed
         if (status.status === "done" || status.status === "failed") {
-          clearInterval(pollInterval)
+          isPolling = false
+          if (timeoutId) clearTimeout(timeoutId)
           intervalsRef.current.delete(fileId)
+          return
         }
         
         // Stop polling if we've been idle too long (job might be stuck)
         if (pollCount >= maxIdlePolls && status.status === "running") {
           console.log(`Stopping polling for job ${jobId} after ${maxIdlePolls} idle checks`)
-          clearInterval(pollInterval)
+          isPolling = false
+          if (timeoutId) clearTimeout(timeoutId)
           intervalsRef.current.delete(fileId)
+          return
         }
+        
+        // Implement exponential backoff for smart polling
+        if (hasTransition || status.stage !== lastStage) {
+          // Reset to fast polling on stage changes
+          pollInterval = 2000
+        } else {
+          // Gradually increase polling interval up to max
+          pollInterval = Math.min(pollInterval * 1.2, maxPollInterval)
+        }
+        
+        // Schedule next poll
+        if (isPolling) {
+          timeoutId = setTimeout(poll, pollInterval)
+        }
+        
       } catch (error) {
         console.error('Status polling error:', error)
-        clearInterval(pollInterval)
+        isPolling = false
+        if (timeoutId) clearTimeout(timeoutId)
         setFiles((prev) =>
           prev.map((f) =>
             f.id === fileId 
@@ -250,17 +276,23 @@ export function UploadInterface() {
           )
         )
       }
-    }, 2000) // Poll every 2 seconds for stage transitions (much more efficient now)
-
-    // Store interval reference for cleanup
-    return pollInterval
+    }
+    
+    // Start polling
+    poll()
+    
+    // Return cleanup function
+    return () => {
+      isPolling = false
+      if (timeoutId) clearTimeout(timeoutId)
+    }
   }, [])
 
   const removeFile = useCallback((fileId: string) => {
-    // Clear interval if it exists
-    const interval = intervalsRef.current.get(fileId)
-    if (interval) {
-      clearInterval(interval)
+    // Clear polling if it exists
+    const cleanup = intervalsRef.current.get(fileId)
+    if (cleanup) {
+      cleanup() // Call cleanup function
       intervalsRef.current.delete(fileId)
     }
     setFiles((prev) => prev.filter((file) => file.id !== fileId))
@@ -269,10 +301,11 @@ export function UploadInterface() {
   const clearCompletedFiles = useCallback(() => {
     setFiles((prev) => {
       const remaining = prev.filter(f => f.status !== "completed")
-      // Clear intervals for completed files
+      // Clear polling for completed files
       prev.forEach(f => {
         if (f.status === "completed" && intervalsRef.current.has(f.id)) {
-          clearInterval(intervalsRef.current.get(f.id)!)
+          const cleanup = intervalsRef.current.get(f.id)!
+          cleanup() // Call cleanup function
           intervalsRef.current.delete(f.id)
         }
       })
@@ -282,15 +315,15 @@ export function UploadInterface() {
 
   const clearAllFiles = useCallback(() => {
     setFiles([])
-    // Clear all intervals
-    intervalsRef.current.forEach((interval) => clearInterval(interval))
+    // Clear all polling
+    intervalsRef.current.forEach((cleanup) => cleanup())
     intervalsRef.current.clear()
   }, [])
 
-  // Cleanup intervals on unmount
+  // Cleanup polling on unmount
   useEffect(() => {
     return () => {
-      intervalsRef.current.forEach((interval) => clearInterval(interval))
+      intervalsRef.current.forEach((cleanup) => cleanup())
       intervalsRef.current.clear()
     }
   }, [])
