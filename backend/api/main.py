@@ -119,7 +119,8 @@ def keep_alive_ping():
     while True:
         try:
             # Get the server URL from environment or use localhost
-            server_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000")
+            port = os.getenv("PORT", "8000")
+            server_url = os.getenv("RENDER_EXTERNAL_URL", f"http://localhost:{port}")
             
             # Ping the health endpoint
             response = requests.get(f"{server_url}/health", timeout=10)
@@ -241,7 +242,7 @@ async def test_video(job_id: str):
         "exists": True, 
         "path": str(output_path),
         "size": file_size,
-        "download_url": f"http://localhost:8000/download/{job_id}"
+        "download_url": f"http://localhost:{os.getenv('PORT', '8000')}/download/{job_id}"
     }
 
 @app.get("/test-cors")

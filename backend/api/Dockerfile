@@ -30,8 +30,11 @@ RUN mkdir -p /app/workspace \
     && python --version \
     && ffmpeg -version
 
+# Make startup script executable
+RUN chmod +x start.sh
+
 # Set environment variables
 ENV WORKSPACE_DIR=/app/workspace
 
 # Start command
-CMD python -m uvicorn main:app --host 0.0.0.0 --port $PORT
+CMD ["./start.sh"]
