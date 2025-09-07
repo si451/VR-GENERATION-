@@ -208,7 +208,15 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     
     # Process frames in chunks to avoid loading all into memory at once
     depths = []
+    import time
+    start_time = time.time()
+    max_processing_time = 1800  # 30 minutes max for depth estimation
+    
     for chunk_start in range(0, n_frames, chunk_size):
+        # Check for timeout
+        if time.time() - start_time > max_processing_time:
+            print(f"⚠️  Depth estimation timeout after {max_processing_time/60:.1f} minutes")
+            break
         chunk_end = min(chunk_start + chunk_size, n_frames)
         chunk_files = frame_files[chunk_start:chunk_end]
         
@@ -241,27 +249,38 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
                 depth_arr = normalize_depth(depth_arr)
                 chunk_depths.append(depth_arr)
                 print(f"✅ Processed frame {chunk_start + i + 1}/{n_frames}")
+                
+                # Update progress every 10 frames to reduce API calls
+                if (i + 1) % 10 == 0:
+                    progress = 10 + int(40.0 * (chunk_start + i + 1) / n_frames)
+                    try:
+                        status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":progress})
+                    except Exception as e:
+                        print(f"⚠️  Status update failed: {e}")
                     
             except (Exception, TimeoutError) as e:
                 print(f"❌ Depth estimation failed for frame {chunk_start + i + 1}: {e}")
                 # Create a dummy depth map as fallback
                 dummy_depth = np.ones((img_array.shape[0], img_array.shape[1]), dtype=np.float32) * 0.5
                 chunk_depths.append(dummy_depth)
-            
-            # Update progress after each frame
-            progress = 10 + int(40.0 * (chunk_start + i + 1) / n_frames)
-            status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":progress})
         
         depths.extend(chunk_depths)
         
         # Update progress
         progress = 10 + int(40.0 * chunk_end / n_frames)
-        status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":progress})
+        try:
+            status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":progress})
+        except Exception as e:
+            print(f"⚠️  Status update failed: {e}")
         
         # Force garbage collection after each chunk
         del chunk_images, chunk_depths
         gc.collect()
         print(f"Completed chunk {chunk_start+1}-{chunk_end}, total depths: {len(depths)}")
+        
+        # Add a small delay to prevent overwhelming the system
+        import time
+        time.sleep(0.1)
     
     print(f"Depth estimation completed for {len(depths)} frames")
     # Free memory after depth estimation
