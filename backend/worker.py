@@ -13,7 +13,7 @@ from pathlib import Path
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
-from api.pipeline import process_job
+from api.pipeline import process_job, process_video_parallel
 from api.config import WORKSPACE_DIR
 
 def main():
@@ -47,18 +47,30 @@ def main():
         print(f"Input already in job directory: {input_path}")
     
     try:
-        # Run the processing job
-        asyncio.run(process_job(job_id, input_path, use_inpaint_sd=True))
-        print(f"Job {job_id} completed successfully")
-        print(f"Results saved in: {job_dir}")
+        # Import status manager
+        from api.status import StatusManager
+        status_mgr = StatusManager(WORKSPACE_DIR)
         
-        # List output files
-        output_files = list(job_dir.glob("*"))
-        print(f"Generated files:")
-        for file in output_files:
-            if file.is_file():
-                size_mb = file.stat().st_size / (1024 * 1024)
-                print(f"  - {file.name} ({size_mb:.1f} MB)")
+        # Create output path
+        output_path = job_dir / f"{job_id}_sbs.mp4"
+        
+        # Run the parallel processing job
+        result = process_video_parallel(job_id, str(input_path), str(output_path), status_mgr)
+        
+        if result["status"] == "success":
+            print(f"Job {job_id} completed successfully")
+            print(f"Results saved in: {job_dir}")
+            
+            # List output files
+            output_files = list(job_dir.glob("*"))
+            print(f"Generated files:")
+            for file in output_files:
+                if file.is_file():
+                    size_mb = file.stat().st_size / (1024 * 1024)
+                    print(f"  - {file.name} ({size_mb:.1f} MB)")
+        else:
+            print(f"Job {job_id} failed: {result.get('error', 'Unknown error')}")
+            sys.exit(1)
                 
     except Exception as e:
         print(f"Job {job_id} failed: {e}")

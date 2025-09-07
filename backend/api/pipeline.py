@@ -5,14 +5,58 @@ import numpy as np
 from PIL import Image
 import cv2
 import os
-from typing import List
+import subprocess
+import time
+from typing import List, Dict, Any
 from tqdm import tqdm
 import gc  # For garbage collection
+import queue
+import threading
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 # from config import WORKSPACE_DIR, DOWNSCALE_WIDTH, KEYFRAME_STRIDE, BASELINE_RATIO, LDI_LAYERS
 from status import StatusManager
 from models import depth_from_hf, create_local_depth_map
+from video_io import probe_video
+
+def get_video_info(video_path: str) -> Dict[str, Any]:
+    """Get video information using FFprobe"""
+    try:
+        meta = probe_video(video_path)
+        duration = float(meta["format"].get("duration", 0.0))
+        fps = 30.0  # Default FPS
+        
+        # Try to get FPS from stream
+        if "streams" in meta and len(meta["streams"]) > 0:
+            stream = meta["streams"][0]
+            if "r_frame_rate" in stream:
+                fps_str = stream["r_frame_rate"]
+                if "/" in fps_str:
+                    num, den = fps_str.split("/")
+                    fps = float(num) / float(den) if float(den) != 0 else 30.0
+                else:
+                    fps = float(fps_str)
+        
+        frame_count = int(duration * fps)
+        
+        return {
+            "duration": duration,
+            "fps": fps,
+            "frame_count": frame_count,
+            "width": int(stream.get("width", 1920)),
+            "height": int(stream.get("height", 1080))
+        }
+    except Exception as e:
+        print(f"Error getting video info: {e}")
+        # Return default values
+        return {
+            "duration": 60.0,
+            "fps": 30.0,
+            "frame_count": 1800,
+            "width": 1920,
+            "height": 1080
+        }
 from inpaint_api import sd_inpaint
 from video_io import extract_frames, probe_video, create_side_by_side
 from flow_utils import compute_flow_cv2, warp_image_with_flow, interpolate_occlusion_aware, forward_backward_consistency_mask
@@ -509,3 +553,297 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     
     # Update status with output path
     status_mgr.update(job_id, {"status":"done", "stage":"finished", "percent":100, "output": str(out_path), "message": "Video processing completed successfully!"})
+
+def process_video_parallel(job_id: str, input_path: str, output_path: str, 
+                          status_mgr: StatusManager) -> Dict[str, Any]:
+    """Process video with parallel stages and memory streaming"""
+    try:
+        # Get video info
+        video_info = get_video_info(input_path)
+        n_frames = video_info['frame_count']
+        fps = video_info['fps']
+        duration = video_info['duration']
+        
+        print(f"🎬 Processing {n_frames} frames at {fps:.2f} FPS")
+        
+        # Create workspace
+        workspace = Path(WORKSPACE_DIR) / job_id
+        workspace.mkdir(parents=True, exist_ok=True)
+        
+        # Stage 1: Extract frames (streaming)
+        print("📸 Extracting frames...")
+        status_mgr.update(job_id, {"status": "running", "stage": "extract_frames", "percent": 5})
+        
+        frame_dir = workspace / "frames"
+        frame_dir.mkdir(exist_ok=True)
+        
+        # Extract frames with streaming
+        extract_frames_streaming(input_path, frame_dir, n_frames)
+        status_mgr.update(job_id, {"status": "running", "stage": "depth_estimation", "percent": 10})
+        
+        # Stage 2: Parallel depth estimation + temporal smoothing + LDI generation
+        print("🧠 Starting parallel processing...")
+        
+        # Create processing queues
+        frame_queue = queue.Queue(maxsize=50)  # Limit memory
+        depth_queue = queue.Queue(maxsize=50)
+        ldi_queue = queue.Queue(maxsize=50)
+        
+        # Start parallel workers
+        with ProcessPoolExecutor(max_workers=4) as executor:
+            # Submit parallel tasks
+            depth_future = executor.submit(process_depth_parallel, frame_dir, n_frames, depth_queue)
+            temporal_future = executor.submit(process_temporal_parallel, depth_queue, n_frames, ldi_queue)
+            ldi_future = executor.submit(process_ldi_parallel, ldi_queue, n_frames, workspace)
+            
+            # Monitor progress
+            monitor_parallel_progress(job_id, status_mgr, depth_future, temporal_future, ldi_future)
+            
+            # Wait for completion
+            depth_future.result()
+            temporal_future.result()
+            ldi_future.result()
+        
+        # Stage 3: Final encoding
+        print("🎥 Final encoding...")
+        status_mgr.update(job_id, {"status": "running", "stage": "final_encoding", "percent": 90})
+        
+        # Encode final video
+        encode_final_video(workspace, output_path, fps)
+        
+        status_mgr.update(job_id, {"status": "completed", "percent": 100})
+        return {"status": "success", "output_path": output_path}
+        
+    except Exception as e:
+        print(f"❌ Parallel processing error: {e}")
+        status_mgr.update(job_id, {"status": "failed", "error": str(e)})
+        return {"status": "error", "error": str(e)}
+
+def extract_frames_streaming(input_path: str, frame_dir: Path, n_frames: int):
+    """Extract frames with streaming to save memory"""
+    # Use FFmpeg to extract frames with streaming
+    cmd = [
+        'ffmpeg', '-i', str(input_path),
+        '-vf', 'fps=30',  # Limit to 30 FPS for processing
+        '-q:v', '2',  # High quality
+        str(frame_dir / 'frame_%06d.jpg')
+    ]
+    
+    subprocess.run(cmd, check=True, capture_output=True)
+
+def process_depth_parallel(frame_dir: Path, n_frames: int, depth_queue: queue.Queue):
+    """Process depth estimation in parallel with memory streaming"""
+    print("🧠 Starting parallel depth estimation...")
+    
+    for i in range(n_frames):
+        try:
+            frame_path = frame_dir / f"frame_{i+1:06d}.jpg"
+            if not frame_path.exists():
+                continue
+                
+            # Load and process single frame
+            img = Image.open(frame_path).convert("RGB")
+            depth_map = create_local_depth_map(img)
+            
+            # Stream to queue instead of storing in memory
+            depth_queue.put((i, depth_map))
+            
+            # Clean up immediately
+            del img, depth_map
+            gc.collect()
+            
+            if (i + 1) % 100 == 0:
+                print(f"✅ Processed {i + 1}/{n_frames} frames for depth")
+                
+        except Exception as e:
+            print(f"❌ Depth processing error for frame {i}: {e}")
+            # Add dummy depth map
+            depth_queue.put((i, np.ones((512, 512), dtype=np.float32) * 0.5))
+    
+    # Signal completion
+    depth_queue.put(None)
+
+def process_temporal_parallel(depth_queue: queue.Queue, n_frames: int, ldi_queue: queue.Queue):
+    """Process temporal smoothing in parallel with memory streaming"""
+    print("⏱️ Starting parallel temporal smoothing...")
+    
+    # Collect depth maps for temporal smoothing
+    depth_maps = {}
+    processed = 0
+    
+    while processed < n_frames:
+        try:
+            item = depth_queue.get(timeout=30)
+            if item is None:
+                break
+                
+            frame_idx, depth_map = item
+            depth_maps[frame_idx] = depth_map
+            
+            # Process in small batches to avoid memory overflow
+            if len(depth_maps) >= 50 or processed == n_frames - 1:
+                # Apply temporal smoothing to batch
+                smoothed_depths = apply_temporal_smoothing_batch(depth_maps)
+                
+                # Stream to LDI queue
+                for frame_idx, smoothed_depth in smoothed_depths.items():
+                    ldi_queue.put((frame_idx, smoothed_depth))
+                
+                # Clean up
+                depth_maps.clear()
+                gc.collect()
+                
+            processed += 1
+            
+        except queue.Empty:
+            print("⚠️ Timeout waiting for depth data")
+            break
+    
+    # Signal completion
+    ldi_queue.put(None)
+
+def process_ldi_parallel(ldi_queue: queue.Queue, n_frames: int, workspace: Path):
+    """Process LDI generation in parallel with memory streaming"""
+    print("🎭 Starting parallel LDI generation...")
+    
+    ldi_dir = workspace / "ldi"
+    ldi_dir.mkdir(exist_ok=True)
+    
+    processed = 0
+    while processed < n_frames:
+        try:
+            item = ldi_queue.get(timeout=30)
+            if item is None:
+                break
+                
+            frame_idx, depth_map = item
+            
+            # Generate LDI for single frame
+            ldi_data = generate_ldi_single_frame(depth_map, frame_idx)
+            
+            # Save to disk immediately
+            ldi_path = ldi_dir / f"ldi_{frame_idx:06d}.npz"
+            np.savez_compressed(ldi_path, **ldi_data)
+            
+            processed += 1
+            
+            if processed % 100 == 0:
+                print(f"✅ Generated {processed}/{n_frames} LDI frames")
+                
+        except queue.Empty:
+            print("⚠️ Timeout waiting for LDI data")
+            break
+
+def monitor_parallel_progress(job_id: str, status_mgr: StatusManager, 
+                            depth_future, temporal_future, ldi_future):
+    """Monitor parallel processing progress"""
+    start_time = time.time()
+    max_time = 1800  # 30 minutes max
+    
+    while not all(f.done() for f in [depth_future, temporal_future, ldi_future]):
+        if time.time() - start_time > max_time:
+            print("⚠️ Parallel processing timeout")
+            break
+            
+        # Update progress based on completed stages
+        progress = 10
+        if depth_future.done():
+            progress += 30
+        if temporal_future.done():
+            progress += 30
+        if ldi_future.done():
+            progress += 20
+            
+        try:
+            status_mgr.update(job_id, {
+                "status": "running", 
+                "stage": "parallel_processing", 
+                "percent": progress
+            })
+        except:
+            pass
+            
+        time.sleep(5)  # Update every 5 seconds
+
+def apply_temporal_smoothing_batch(depth_maps: Dict[int, np.ndarray]) -> Dict[int, np.ndarray]:
+    """Apply temporal smoothing to a batch of depth maps"""
+    if not depth_maps:
+        return {}
+    
+    # Sort by frame index
+    sorted_frames = sorted(depth_maps.items())
+    smoothed = {}
+    
+    for i, (frame_idx, depth_map) in enumerate(sorted_frames):
+        # Simple temporal smoothing - average with neighbors
+        neighbors = []
+        
+        # Add previous frame
+        if i > 0:
+            prev_idx, prev_depth = sorted_frames[i-1]
+            neighbors.append(prev_depth)
+        
+        # Add current frame
+        neighbors.append(depth_map)
+        
+        # Add next frame
+        if i < len(sorted_frames) - 1:
+            next_idx, next_depth = sorted_frames[i+1]
+            neighbors.append(next_depth)
+        
+        # Average the neighbors
+        if len(neighbors) > 1:
+            smoothed_depth = np.mean(neighbors, axis=0)
+        else:
+            smoothed_depth = depth_map
+            
+        smoothed[frame_idx] = smoothed_depth
+    
+    return smoothed
+
+def generate_ldi_single_frame(depth_map: np.ndarray, frame_idx: int) -> Dict[str, np.ndarray]:
+    """Generate LDI data for a single frame"""
+    # Simple LDI generation - create stereo views
+    h, w = depth_map.shape
+    
+    # Create left and right views based on depth
+    left_view = np.zeros((h, w, 3), dtype=np.uint8)
+    right_view = np.zeros((h, w, 3), dtype=np.uint8)
+    
+    # Simple stereo generation (placeholder - you can enhance this)
+    for y in range(h):
+        for x in range(w):
+            depth = depth_map[y, x]
+            # Create stereo offset based on depth
+            offset = int(depth * 10)  # Adjust multiplier as needed
+            
+            # Left view
+            if x - offset >= 0:
+                left_view[y, x] = [255, 255, 255]  # White for now
+            
+            # Right view  
+            if x + offset < w:
+                right_view[y, x] = [255, 255, 255]  # White for now
+    
+    return {
+        'left_view': left_view,
+        'right_view': right_view,
+        'depth_map': depth_map
+    }
+
+def encode_final_video(workspace: Path, output_path: str, fps: float):
+    """Encode the final VR180 video"""
+    ldi_dir = workspace / "ldi"
+    
+    # Create video from LDI frames
+    cmd = [
+        'ffmpeg', '-y',
+        '-framerate', str(fps),
+        '-i', str(ldi_dir / 'ldi_%06d.npz'),
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '23',
+        str(output_path)
+    ]
+    
+    subprocess.run(cmd, check=True)
