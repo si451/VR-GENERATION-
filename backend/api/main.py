@@ -7,6 +7,9 @@ import uuid
 import asyncio
 import subprocess
 import sys
+import threading
+import time
+import requests
 # from .config import WORKSPACE_DIR, MAX_UPLOAD_BYTES
 from status import StatusManager
 from video_io import probe_video
@@ -43,9 +46,74 @@ app.add_middleware(
 status_mgr = StatusManager(WORKSPACE_DIR)
 connections = {}  # job_id -> set of websockets
 
+# Keep-alive mechanism for free tier
+def keep_alive_ping():
+    """Ping the server every 10 minutes to prevent it from sleeping"""
+    while True:
+        try:
+            # Get the server URL from environment or use localhost
+            server_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000")
+            
+            # Ping the health endpoint
+            response = requests.get(f"{server_url}/health", timeout=10)
+            if response.status_code == 200:
+                print(f"✅ Keep-alive ping successful: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            else:
+                print(f"⚠️ Keep-alive ping failed with status: {response.status_code}")
+                
+        except Exception as e:
+            print(f"❌ Keep-alive ping error: {e}")
+        
+        # Wait 10 minutes (600 seconds) before next ping
+        time.sleep(600)
+
+def internal_keep_alive():
+    """Internal keep-alive that runs every 5 minutes to keep the process active"""
+    while True:
+        try:
+            # Just log that we're alive
+            print(f"💓 Internal keep-alive: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # Do some lightweight work to keep the process active
+            _ = len(str(time.time()))
+            
+        except Exception as e:
+            print(f"❌ Internal keep-alive error: {e}")
+        
+        # Wait 5 minutes (300 seconds) before next internal ping
+        time.sleep(300)
+
+# Start keep-alive threads
+keep_alive_thread = threading.Thread(target=keep_alive_ping, daemon=True)
+keep_alive_thread.start()
+
+internal_keep_alive_thread = threading.Thread(target=internal_keep_alive, daemon=True)
+internal_keep_alive_thread.start()
+
+print("🔄 Keep-alive mechanisms started:")
+print("   - External ping every 10 minutes")
+print("   - Internal keep-alive every 5 minutes")
+
+@app.on_event("startup")
+async def startup_event():
+    """Startup event to ensure keep-alive is running"""
+    print("🚀 VR180 Backend started with keep-alive mechanisms")
+    print("💡 Server will stay awake to prevent free tier sleep")
+
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "message": "VR180 Backend is running"}
+    return {
+        "status": "healthy", 
+        "message": "VR180 Backend is running",
+        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+        "uptime": "active",
+        "keep_alive": "enabled"
+    }
+
+@app.get("/ping")
+async def ping():
+    """Simple ping endpoint for keep-alive"""
+    return {"pong": time.strftime('%Y-%m-%d %H:%M:%S')}
 
 @app.get("/test-video/{job_id}")
 async def test_video(job_id: str):
