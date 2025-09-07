@@ -6,7 +6,7 @@ import numpy as np
 from io import BytesIO
 from PIL import Image
 from typing import List, Dict, Any
-from .config import HUGGINGFACE_TOKEN, HF_API_URL, MODEL_DEPTH
+from config import HUGGINGFACE_TOKEN, HF_API_URL, MODEL_DEPTH
 
 HEADERS = {"Authorization": f"Bearer {HUGGINGFACE_TOKEN}"} if HUGGINGFACE_TOKEN else {}
 
