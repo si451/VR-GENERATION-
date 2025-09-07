@@ -233,11 +233,8 @@ async def upload(file: UploadFile = File(...)):
             # Try multiple possible paths for worker.py
             worker_paths = [
                 "worker.py",     # Same directory (Railway runs from backend/)
-                "../worker.py",  # Relative from api directory
-                str(ROOT.parent / "worker.py"),  # Absolute path
-                "/app/worker.py",  # Railway deployment path
-                "/app/backend/worker.py",  # Alternative Railway path
-                "./worker.py"    # Explicit current directory
+                
+                
             ]
             
             print(f"Searching for worker.py in the following paths:")
