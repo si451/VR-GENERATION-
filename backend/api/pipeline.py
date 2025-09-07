@@ -201,63 +201,60 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     depths = []
     batch_size = 12  # Reduced batch size for memory efficiency
     
-    # Memory-efficient image loading with chunked processing
-    print("Loading frames with memory optimization...")
-    all_images = []
-    chunk_size = 50  # Process images in chunks to manage memory
+    # Process frames in smaller batches to avoid memory issues
+    print("Processing frames in small batches to manage memory...")
+    batch_size = 8  # Reduced batch size for memory efficiency
+    chunk_size = 20  # Smaller chunk size for loading
     
+    # Process frames in chunks to avoid loading all into memory at once
+    depths = []
     for chunk_start in range(0, n_frames, chunk_size):
         chunk_end = min(chunk_start + chunk_size, n_frames)
         chunk_files = frame_files[chunk_start:chunk_end]
         
-        print(f"Loading frames {chunk_start+1}-{chunk_end} of {n_frames}")
+        print(f"Processing frames {chunk_start+1}-{chunk_end} of {n_frames}")
         
+        # Load chunk of images
+        chunk_images = []
         for fpath in chunk_files:
             try:
                 img = Image.open(fpath).convert("RGB")
                 # Resize to target resolution if needed to save memory
                 if img.size[0] > DOWNSCALE_WIDTH:
                     img = img.resize((DOWNSCALE_WIDTH, int(img.size[1] * DOWNSCALE_WIDTH / img.size[0])), Image.Resampling.LANCZOS)
-                all_images.append(np.array(img))
+                chunk_images.append(np.array(img))
             except Exception as e:
                 print(f"Failed to load frame {fpath}: {e}")
                 # Create dummy image
                 dummy_img = np.ones((DOWNSCALE_WIDTH//2, DOWNSCALE_WIDTH//2, 3), dtype=np.uint8) * 128
-                all_images.append(dummy_img)
+                chunk_images.append(dummy_img)
+        
+        # Process this chunk
+        chunk_depths = []
+        for i, img_array in enumerate(chunk_images):
+            try:
+                # Convert numpy array to PIL for depth estimation
+                img_pil = Image.fromarray(img_array)
+                depth_arr = create_local_depth_map(img_pil)
+                depth_arr = normalize_depth(depth_arr)
+                chunk_depths.append(depth_arr)
+                print(f"Processed frame {chunk_start + i + 1}/{n_frames}")
+            except Exception as e:
+                print(f"Depth estimation failed for frame {chunk_start + i + 1}: {e}")
+                # Create a dummy depth map as fallback
+                dummy_depth = np.ones((img_array.shape[0], img_array.shape[1]), dtype=np.float32) * 0.5
+                chunk_depths.append(dummy_depth)
+        
+        depths.extend(chunk_depths)
+        
+        # Update progress
+        progress = 10 + int(40.0 * chunk_end / n_frames)
+        status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":progress})
         
         # Force garbage collection after each chunk
+        del chunk_images, chunk_depths
         gc.collect()
-    
-    print(f"Loaded {len(all_images)} frames successfully")
-    
-    with tqdm(total=n_frames, desc="Batch depth estimation", unit="frame") as pbar:
-        for batch_start in range(0, n_frames, batch_size):
-            batch_end = min(batch_start + batch_size, n_frames)
-            batch_images = all_images[batch_start:batch_end]
-            
-            # Process batch using vectorized operations
-            batch_depths = []
-            for i, img_array in enumerate(batch_images):
-                try:
-                    # Convert numpy array to PIL for depth estimation
-                    img_pil = Image.fromarray(img_array)
-                    depth_arr = create_local_depth_map(img_pil)
-                    depth_arr = normalize_depth(depth_arr)
-                    batch_depths.append(depth_arr)
-                except Exception as e:
-                    print(f"Depth estimation failed for frame {batch_start + i}: {e}")
-                    # Create a dummy depth map as fallback
-                    h, w = img_array.shape[:2]
-                    depth_arr = np.ones((h, w), dtype=np.float32) * 0.5
-                    batch_depths.append(depth_arr)
-            
-            depths.extend(batch_depths)
-            pbar.update(len(batch_images))
-            
-            # Update status less frequently to avoid file locking issues
-            if batch_end % 64 == 0 or batch_end == n_frames:  # Update every 64 frames
-                progress = 10 + int(40.0 * batch_end / n_frames)
-                status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":progress})
+        print(f"Completed chunk {chunk_start+1}-{chunk_end}, total depths: {len(depths)}")
     
     print(f"Depth estimation completed for {len(depths)} frames")
     # Free memory after depth estimation
@@ -265,7 +262,6 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":52})
     # Memory-efficient temporal smoothing with on-the-fly flow computation
     print(f"Starting memory-efficient temporal smoothing...")
-    frames_bgr = [cv2.cvtColor(img, cv2.COLOR_RGB2BGR) for img in all_images]
     depths_smoothed = []
     
     # Apply temporal smoothing with on-the-fly flow computation to save memory
@@ -276,16 +272,31 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
             prev_idx = max(i-1, 0)
             next_idx = min(i+1, n_frames-1)
             
-            # Compute flows on-the-fly to save memory
+            # Load frames on-demand for flow computation
             try:
                 if i > 0:
-                    flow_cur_to_prev = compute_flow_cv2(frames_bgr[i], frames_bgr[prev_idx])
+                    # Load current and previous frames
+                    img_cur = Image.open(frame_files[i]).convert("RGB")
+                    img_prev = Image.open(frame_files[prev_idx]).convert("RGB")
+                    if img_cur.size[0] > DOWNSCALE_WIDTH:
+                        img_cur = img_cur.resize((DOWNSCALE_WIDTH, int(img_cur.size[1] * DOWNSCALE_WIDTH / img_cur.size[0])), Image.Resampling.LANCZOS)
+                    if img_prev.size[0] > DOWNSCALE_WIDTH:
+                        img_prev = img_prev.resize((DOWNSCALE_WIDTH, int(img_prev.size[1] * DOWNSCALE_WIDTH / img_prev.size[0])), Image.Resampling.LANCZOS)
+                    
+                    frame_cur_bgr = cv2.cvtColor(np.array(img_cur), cv2.COLOR_RGB2BGR)
+                    frame_prev_bgr = cv2.cvtColor(np.array(img_prev), cv2.COLOR_RGB2BGR)
+                    flow_cur_to_prev = compute_flow_cv2(frame_cur_bgr, frame_prev_bgr)
                 else:
                     h, w = depth_cur.shape[:2]
                     flow_cur_to_prev = np.zeros((h, w, 2), dtype=np.float32)
                 
                 if i < n_frames-1:
-                    flow_cur_to_next = compute_flow_cv2(frames_bgr[i], frames_bgr[next_idx])
+                    # Load next frame
+                    img_next = Image.open(frame_files[next_idx]).convert("RGB")
+                    if img_next.size[0] > DOWNSCALE_WIDTH:
+                        img_next = img_next.resize((DOWNSCALE_WIDTH, int(img_next.size[1] * DOWNSCALE_WIDTH / img_next.size[0])), Image.Resampling.LANCZOS)
+                    frame_next_bgr = cv2.cvtColor(np.array(img_next), cv2.COLOR_RGB2BGR)
+                    flow_cur_to_next = compute_flow_cv2(frame_cur_bgr, frame_next_bgr)
                 else:
                     flow_cur_to_next = np.zeros_like(flow_cur_to_prev)
                 
@@ -294,6 +305,11 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
                 h, w = depth_cur.shape[:2]
                 flow_cur_to_prev = np.zeros((h, w, 2), dtype=np.float32)
                 flow_cur_to_next = np.zeros_like(flow_cur_to_prev)
+            
+            # Update progress every 50 frames
+            if i % 50 == 0:
+                progress = 52 + int(8.0 * i / n_frames)
+                status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":progress})
             
             # Ensure flow dimensions match depth dimensions
             if flow_cur_to_prev.shape[:2] != depth_cur.shape[:2]:
@@ -393,7 +409,11 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
             
             # Process batch of frames
             for i in range(batch_start, batch_end):
-                frame_rgb = all_images[i].astype(np.uint8)
+                # Load frame on-demand
+                img = Image.open(frame_files[i]).convert("RGB")
+                if img.size[0] > DOWNSCALE_WIDTH:
+                    img = img.resize((DOWNSCALE_WIDTH, int(img.size[1] * DOWNSCALE_WIDTH / img.size[0])), Image.Resampling.LANCZOS)
+                frame_rgb = np.array(img).astype(np.uint8)
                 depth_norm = depths_smoothed[i]
                 
                 # Build LDI and reproject
