@@ -203,8 +203,8 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     
     # Process frames in smaller batches to avoid memory issues
     print("Processing frames in small batches to manage memory...")
-    batch_size = 8  # Reduced batch size for memory efficiency
-    chunk_size = 20  # Smaller chunk size for loading
+    batch_size = 4  # Very small batch size for memory efficiency
+    chunk_size = 10  # Very small chunk size for loading
     
     # Process frames in chunks to avoid loading all into memory at once
     depths = []
@@ -235,15 +235,22 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
             try:
                 # Convert numpy array to PIL for depth estimation
                 img_pil = Image.fromarray(img_array)
+                
+                # Use simpler depth estimation for reliability
                 depth_arr = create_local_depth_map(img_pil)
                 depth_arr = normalize_depth(depth_arr)
                 chunk_depths.append(depth_arr)
-                print(f"Processed frame {chunk_start + i + 1}/{n_frames}")
-            except Exception as e:
-                print(f"Depth estimation failed for frame {chunk_start + i + 1}: {e}")
+                print(f"✅ Processed frame {chunk_start + i + 1}/{n_frames}")
+                    
+            except (Exception, TimeoutError) as e:
+                print(f"❌ Depth estimation failed for frame {chunk_start + i + 1}: {e}")
                 # Create a dummy depth map as fallback
                 dummy_depth = np.ones((img_array.shape[0], img_array.shape[1]), dtype=np.float32) * 0.5
                 chunk_depths.append(dummy_depth)
+            
+            # Update progress after each frame
+            progress = 10 + int(40.0 * (chunk_start + i + 1) / n_frames)
+            status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":progress})
         
         depths.extend(chunk_depths)
         
