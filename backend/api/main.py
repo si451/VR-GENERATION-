@@ -375,7 +375,7 @@ async def upload(file: UploadFile = File(...)):
                             elif "Total frames extracted:" in line:
                                 status_mgr.update(job_id, {"status":"running", "stage":"extract_frames", "percent":27, "message":"Frame extraction verified"})
                             elif "Starting depth estimation" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":30, "message":"Starting depth estimation...", "stage_started": True})
+                                status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":30, "message":"Starting depth estimation... (Estimated time: 15-20 minutes)", "stage_started": True})
                             elif "Depth estimation:" in line and "%" in line:
                                 # Extract progress from tqdm output
                                 import re
@@ -390,7 +390,7 @@ async def upload(file: UploadFile = File(...)):
                             elif "Depth estimation completed" in line:
                                 status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":50, "message":"Depth estimation completed", "stage_completed": True})
                             elif "Starting temporal smoothing" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":55, "message":"Starting temporal smoothing...", "stage_started": True})
+                                status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":55, "message":"Starting temporal smoothing... (Estimated time: 5-8 minutes)", "stage_started": True})
                             elif "Temporal smoothing:" in line and "%" in line:
                                 # Extract progress from tqdm output
                                 import re
@@ -405,7 +405,7 @@ async def upload(file: UploadFile = File(...)):
                             elif "Temporal smoothing completed" in line:
                                 status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":65, "message":"Temporal smoothing completed", "stage_completed": True})
                             elif "Starting LDI reprojection and inpainting" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":70, "message":"Starting VR180 view creation...", "stage_started": True})
+                                status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":70, "message":"Starting VR180 view creation... (Estimated time: 8-12 minutes)", "stage_started": True})
                             elif "LDI & Inpainting:" in line and "%" in line:
                                 # Extract progress from tqdm output
                                 import re
@@ -420,7 +420,7 @@ async def upload(file: UploadFile = File(...)):
                             elif "LDI reprojection and inpainting completed" in line:
                                 status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":85, "message":"VR180 reprojection completed", "stage_completed": True})
                             elif "Creating final VR180 video" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":90, "message":"Creating final VR180 video...", "stage_started": True})
+                                status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":90, "message":"Creating final VR180 video... (Estimated time: 2-3 minutes)", "stage_started": True})
                             elif "Creating side-by-side video" in line:
                                 status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":92, "message":"Creating side-by-side video..."})
                             elif "Encoding video with high quality settings..." in line:

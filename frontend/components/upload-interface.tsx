@@ -152,10 +152,8 @@ export function UploadInterface() {
 
   const pollJobStatus = useCallback((jobId: string, fileId: string) => {
     let lastStage = "queued"
+    let lastProgress = 0
     let pollCount = 0
-    let maxIdlePolls = 20 // Stop polling after 20 idle checks
-    let pollInterval = 2000 // Start with 2 seconds
-    let maxPollInterval = 10000 // Max 10 seconds between polls
     let timeoutId: ReturnType<typeof setTimeout>
     let isPolling = true
     
@@ -164,7 +162,6 @@ export function UploadInterface() {
       
       try {
         pollCount++
-        console.log(`Smart polling status for job ${jobId} (attempt ${pollCount}, interval: ${pollInterval}ms)...`)
         
         // Use stage transition endpoint for smart polling
         const response = await fetch(`${API_BASE_URL}/status/${jobId}/stage-transitions`)
@@ -179,11 +176,11 @@ export function UploadInterface() {
         const status = data.status
         const hasTransition = data.has_transition
         
-        console.log(`Status for job ${jobId}:`, status, `Has transition: ${hasTransition}`)
-        
-        // Only update UI if there's a stage transition or if we haven't polled in a while
-        if (hasTransition || status.stage !== lastStage || pollCount % 5 === 0) {
+        // Only update UI if there's a stage transition or significant progress change
+        const progressChange = Math.abs((status.percent || 0) - lastProgress) >= 10
+        if (hasTransition || status.stage !== lastStage || progressChange) {
           lastStage = status.stage || "unknown"
+          lastProgress = status.percent || 0
         
           setFiles((prev) =>
             prev.map((f) => {
@@ -237,27 +234,20 @@ export function UploadInterface() {
           return
         }
         
-        // Stop polling if we've been idle too long (job might be stuck)
-        if (pollCount >= maxIdlePolls && status.status === "running") {
-          console.log(`Stopping polling for job ${jobId} after ${maxIdlePolls} idle checks`)
-          isPolling = false
-          if (timeoutId) clearTimeout(timeoutId)
-          intervalsRef.current.delete(fileId)
-          return
-        }
+        // Determine next poll interval based on stage and progress
+        let nextPollInterval = 5000 // Default 5 seconds
         
-        // Implement exponential backoff for smart polling
         if (hasTransition || status.stage !== lastStage) {
-          // Reset to fast polling on stage changes
-          pollInterval = 2000
-        } else {
-          // Gradually increase polling interval up to max
-          pollInterval = Math.min(pollInterval * 1.2, maxPollInterval)
+          // Poll quickly on stage changes
+          nextPollInterval = 2000
+        } else if (status.status === "running") {
+          // Poll every 10 seconds during processing
+          nextPollInterval = 10000
         }
         
         // Schedule next poll
         if (isPolling) {
-          timeoutId = setTimeout(poll, pollInterval)
+          timeoutId = setTimeout(poll, nextPollInterval)
         }
         
       } catch (error) {
@@ -355,9 +345,9 @@ export function UploadInterface() {
     switch (file.status) {
       case "uploading":
         return "Uploading..."
-      case "processing":
-        const baseMessage = file.stageMessage || file.currentStage || "Converting to VR180..."
-        return `${baseMessage} (Processing may take 30-40 minutes)`
+        case "processing":
+          const baseMessage = file.stageMessage || file.currentStage || "Converting to VR180..."
+          return `${baseMessage}`
       case "completed":
         return "Ready for VR"
       case "error":

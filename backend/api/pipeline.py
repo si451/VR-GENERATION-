@@ -236,17 +236,13 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     frame_files = sorted(frames_down.glob("frame_*.png"))
     n_frames = len(frame_files)
     print(f"Total frames extracted: {n_frames}")
-    print(f"🔧 DEBUG: Frame extraction completed, moving to depth estimation")
     status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":10, "frames": n_frames})
 
-    # Enhanced batch depth estimation with parallel processing
-    print(f"Starting batch depth estimation for {n_frames} frames...")
-    print(f"🔧 DEBUG: About to start depth estimation process")
+    # Enhanced batch depth estimation
+    print(f"Starting depth estimation for {n_frames} frames...")
     depths = []
-    batch_size = 12  # Reduced batch size for memory efficiency
     
     # Process frames in smaller batches to avoid memory issues
-    print("Processing frames in small batches to manage memory...")
     batch_size = 4  # Very small batch size for memory efficiency
     chunk_size = 10  # Very small chunk size for loading
     
@@ -257,6 +253,7 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     max_processing_time = 1800  # 30 minutes max for depth estimation
     
     # Create tqdm progress bar for depth estimation
+    last_progress = 0
     with tqdm(total=n_frames, desc="Depth Estimation", unit="frame", 
               bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
         
@@ -298,14 +295,15 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
                     # Update progress bar
                     pbar.update(1)
                     
-                    # Update status every 25 frames to reduce API calls
-                    if (chunk_start + i + 1) % 25 == 0:
-                        progress = 10 + int(40.0 * (chunk_start + i + 1) / n_frames)
+                    # Update status every 10% progress to reduce API calls
+                    current_progress = 10 + int(40.0 * (chunk_start + i + 1) / n_frames)
+                    if current_progress % 10 == 0 and current_progress != last_progress:
+                        last_progress = current_progress
                         try:
                             status_mgr.update(job_id, {
                                 "status":"running", 
                                 "stage":"depth_estimation", 
-                                "percent":progress,
+                                "percent":current_progress,
                                 "message":f"Estimating depth maps... {chunk_start + i + 1}/{n_frames} frames"
                             })
                         except Exception as e:
@@ -332,11 +330,10 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     gc.collect()
     status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":52})
     # Memory-efficient temporal smoothing with on-the-fly flow computation
-    print(f"Starting memory-efficient temporal smoothing...")
+    print(f"Starting temporal smoothing...")
     depths_smoothed = []
+    last_progress = 0
     
-    # Apply temporal smoothing with on-the-fly flow computation to save memory
-    print("Applying temporal smoothing with on-the-fly flow computation...")
     with tqdm(total=n_frames, desc="Temporal Smoothing", unit="frame",
               bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
         for i in range(n_frames):
@@ -378,14 +375,15 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
                 flow_cur_to_prev = np.zeros((h, w, 2), dtype=np.float32)
                 flow_cur_to_next = np.zeros_like(flow_cur_to_prev)
             
-            # Update progress every 50 frames
-            if i % 50 == 0:
-                progress = 52 + int(8.0 * i / n_frames)
+            # Update progress every 10% progress
+            current_progress = 52 + int(8.0 * i / n_frames)
+            if current_progress % 10 == 0 and current_progress != last_progress:
+                last_progress = current_progress
                 try:
                     status_mgr.update(job_id, {
                         "status":"running", 
                         "stage":"temporal_smoothing", 
-                        "percent":progress,
+                        "percent":current_progress,
                         "message":f"Applying temporal smoothing... {i+1}/{n_frames} frames"
                     })
                 except Exception as e:
@@ -479,11 +477,12 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
 
     status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":65})
     # Enhanced batch LDI reprojection and inpainting
-    print(f"Starting batch LDI reprojection and inpainting...")
+    print(f"Starting VR180 view creation...")
     
     # Process frames in batches for better performance
     ldi_batch_size = 4  # Reduced batch size for memory efficiency
-    with tqdm(total=n_frames, desc="LDI & Inpainting", unit="frame",
+    last_progress = 0
+    with tqdm(total=n_frames, desc="VR180 View Creation", unit="frame",
               bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
         for batch_start in range(0, n_frames, ldi_batch_size):
             batch_end = min(batch_start + ldi_batch_size, n_frames)
@@ -536,17 +535,19 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
 
                 pbar.update(1)
             
-            # Update status for the batch
-            progress = 65 + int(20.0 * batch_end / n_frames)
-            try:
-                status_mgr.update(job_id, {
-                    "status":"running", 
-                    "stage":"ldi_reprojection", 
-                    "percent":progress,
-                    "message":f"Creating VR180 views... {batch_end}/{n_frames} frames"
-                })
-            except Exception as e:
-                print(f"⚠️  Status update failed: {e}")
+            # Update status every 10% progress
+            current_progress = 65 + int(20.0 * batch_end / n_frames)
+            if current_progress % 10 == 0 and current_progress != last_progress:
+                last_progress = current_progress
+                try:
+                    status_mgr.update(job_id, {
+                        "status":"running", 
+                        "stage":"ldi_reprojection", 
+                        "percent":current_progress,
+                        "message":f"Creating VR180 views... {batch_end}/{n_frames} frames"
+                    })
+                except Exception as e:
+                    print(f"⚠️  Status update failed: {e}")
     
     print(f"LDI reprojection and inpainting completed")
 
