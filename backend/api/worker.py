@@ -48,7 +48,7 @@ def main():
     
     try:
         # Import status manager
-        from api.status import StatusManager
+        from status import StatusManager
         status_mgr = StatusManager(WORKSPACE_DIR)
         
         # Create output path
