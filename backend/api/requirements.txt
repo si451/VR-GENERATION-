@@ -3,8 +3,8 @@ uvicorn[standard]
 requests
 pillow
 numpy
-opencv-python
-opencv-contrib-python
+opencv-python-headless
+opencv-contrib-python-headless
 huggingface-hub
 python-multipart
 aiofiles
