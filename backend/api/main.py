@@ -97,8 +97,8 @@ print("   - Internal keep-alive every 5 minutes")
 @app.on_event("startup")
 async def startup_event():
     """Startup event to ensure keep-alive is running"""
-    print("🚀 VR180 Backend started with keep-alive mechanisms")
-    print("💡 Server will stay awake to prevent free tier sleep")
+    print("🚀 VR180 Backend started successfully")
+    print("💡 Ready to process VR180 videos")
 
 @app.get("/health")
 async def health_check():
@@ -106,14 +106,43 @@ async def health_check():
         "status": "healthy", 
         "message": "VR180 Backend is running",
         "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-        "uptime": "active",
-        "keep_alive": "enabled"
+        "uptime": "active"
     }
 
-@app.get("/ping")
-async def ping():
-    """Simple ping endpoint for keep-alive"""
-    return {"pong": time.strftime('%Y-%m-%d %H:%M:%S')}
+@app.get("/debug/files")
+async def debug_files():
+    """Debug endpoint to check file structure"""
+    import os
+    from pathlib import Path
+    
+    current_dir = os.getcwd()
+    root_dir = ROOT
+    
+    # Check for worker.py in various locations
+    worker_locations = {
+        "current_dir": os.path.join(current_dir, "worker.py"),
+        "current_dir_explicit": os.path.join(current_dir, "./worker.py"),
+        "parent_dir": os.path.join(current_dir, "../worker.py"),
+        "root_parent": str(ROOT.parent / "worker.py"),
+        "api_dir": str(ROOT / "worker.py"),
+        "railway_app": "/app/worker.py",
+        "railway_backend": "/app/backend/worker.py"
+    }
+    
+    results = {}
+    for name, path in worker_locations.items():
+        results[name] = {
+            "path": path,
+            "exists": os.path.exists(path),
+            "is_file": os.path.isfile(path) if os.path.exists(path) else False
+        }
+    
+    return {
+        "current_working_directory": current_dir,
+        "root_directory": str(root_dir),
+        "directory_contents": os.listdir(current_dir),
+        "worker_locations": results
+    }
 
 @app.get("/test-video/{job_id}")
 async def test_video(job_id: str):
@@ -203,21 +232,30 @@ async def upload(file: UploadFile = File(...)):
             # Start worker process and capture output
             # Try multiple possible paths for worker.py
             worker_paths = [
+                "worker.py",     # Same directory (Railway runs from backend/)
                 "../worker.py",  # Relative from api directory
-                "worker.py",     # Same directory
                 str(ROOT.parent / "worker.py"),  # Absolute path
-                "/app/worker.py"  # Railway deployment path
+                "/app/worker.py",  # Railway deployment path
+                "/app/backend/worker.py",  # Alternative Railway path
+                "./worker.py"    # Explicit current directory
             ]
+            
+            print(f"Searching for worker.py in the following paths:")
+            for path in worker_paths:
+                exists = os.path.exists(path)
+                print(f"  {path}: {'EXISTS' if exists else 'NOT FOUND'}")
             
             worker_cmd = None
             for worker_path in worker_paths:
                 if os.path.exists(worker_path):
                     worker_cmd = [sys.executable, worker_path, job_id, str(input_path)]
-                    print(f"Found worker.py at: {worker_path}")
+                    print(f"✅ Found worker.py at: {worker_path}")
                     break
             
             if not worker_cmd:
-                print("ERROR: worker.py not found in any expected location")
+                print("❌ ERROR: worker.py not found in any expected location")
+                print(f"Current working directory: {os.getcwd()}")
+                print(f"Directory contents: {os.listdir('.')}")
                 status_mgr.update(job_id, {"status":"failed", "message":"Worker script not found"})
                 return
             
