@@ -664,8 +664,8 @@ def process_depth_parallel(frame_dir: Path, n_frames: int, depth_queue: queue.Qu
                             "percent": progress,
                             "message": f"Processing depth maps... {i + 1}/{n_frames} frames"
                         })
-                    except:
-                        pass
+                    except Exception as e:
+                        print(f"❌ Status update error: {e}")
                 
         except Exception as e:
             print(f"❌ Depth processing error for frame {i}: {e}")
@@ -719,8 +719,8 @@ def process_temporal_parallel(depth_queue: queue.Queue, n_frames: int, ldi_queue
                             "percent": progress,
                             "message": f"Applying temporal smoothing... {processed}/{n_frames} frames"
                         })
-                    except:
-                        pass
+                    except Exception as e:
+                        print(f"❌ Status update error: {e}")
             
         except queue.Empty:
             print("⚠️ Timeout waiting for depth data")
@@ -766,8 +766,8 @@ def process_ldi_parallel(ldi_queue: queue.Queue, n_frames: int, workspace: Path,
                             "percent": progress,
                             "message": f"Creating VR180 views... {processed}/{n_frames} frames"
                         })
-                    except:
-                        pass
+                    except Exception as e:
+                        print(f"❌ Status update error: {e}")
                 
         except queue.Empty:
             print("⚠️ Timeout waiting for LDI data")
