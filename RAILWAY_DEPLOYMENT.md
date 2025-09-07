@@ -13,30 +13,40 @@
 ### Step 2: Configure Service
 
 1. **Root Directory**: `backend/api`
-2. **Build Command**: `pip install -r requirements.txt` (or leave empty - handled by nixpacks.toml)
-3. **Start Command**: `python -m uvicorn main:app --host 0.0.0.0 --port $PORT` (or leave empty - handled by nixpacks.toml)
+2. **Build Command**: Leave empty (handled by Dockerfile)
+3. **Start Command**: Leave empty (handled by Dockerfile)
 
-**Note**: The `nixpacks.toml` file automatically installs FFmpeg and handles the build process. The requirements.txt uses `opencv-python-headless` to avoid GUI library dependencies.
+**Note**: The `Dockerfile` automatically installs FFmpeg and handles the build process. The requirements.txt uses `opencv-python-headless` to avoid GUI library dependencies.
 
-### Step 2.1: Nixpacks Configuration
+### Step 2.1: Dockerfile Configuration
 
-The `nixpacks.toml` file in the backend/api directory configures Railway's build process:
+The `Dockerfile` in the backend/api directory configures Railway's build process:
 
-```toml
-[phases.setup]
-nixPkgs = ['ffmpeg']
+```dockerfile
+FROM ubuntu:22.04
 
-[phases.install]
-cmds = ['pip install -r requirements.txt']
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
 
-[phases.build]
-cmds = ['echo "Build completed"', 'which ffmpeg', 'ffmpeg -version']
+# Install system dependencies including FFmpeg
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
-[start]
-cmd = 'python -m uvicorn main:app --host 0.0.0.0 --port $PORT'
+WORKDIR /app
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+COPY . .
+
+ENV PORT=8080
+ENV WORKSPACE_DIR=/app/workspace
+CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
-This ensures FFmpeg is installed during the build phase.
+This ensures FFmpeg is installed via apt-get during the build phase.
 
 ### Step 3: Environment Variables
 
