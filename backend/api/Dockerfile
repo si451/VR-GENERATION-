@@ -37,4 +37,4 @@ RUN chmod +x start.sh
 ENV WORKSPACE_DIR=/app/workspace
 
 # Start command
-CMD ["./start.sh"]
+CMD bash -c "echo '🚀 Starting VR180 Backend on port $PORT' && python -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
