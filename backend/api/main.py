@@ -579,5 +579,4 @@ async def ws_job(websocket: WebSocket, job_id: str):
     except WebSocketDisconnect:
         conns.discard(websocket)
 
-if __name__ == "__main__":
-    uvicorn.run("api.main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8080")), reload=True)
+# Server startup is handled by start.sh script
