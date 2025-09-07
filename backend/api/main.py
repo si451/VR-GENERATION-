@@ -27,6 +27,9 @@ async def startup_event():
     import shutil
     import glob
     
+    print("🔧 DEBUG: Startup event triggered")
+    print(f"🔧 DEBUG: PORT environment variable: {os.getenv('PORT', 'NOT SET')}")
+    print(f"🔧 DEBUG: Current working directory: {os.getcwd()}")
     print("🔧 Checking system dependencies...")
     
     # Check FFmpeg with comprehensive search
