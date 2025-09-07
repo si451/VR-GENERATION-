@@ -20,6 +20,36 @@ WORKSPACE_DIR = Path(os.getenv("WORKSPACE_DIR", str(ROOT.parent / "workspace")))
 WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="VR180 Backend")
 
+# Check FFmpeg availability on startup
+@app.on_event("startup")
+async def startup_event():
+    """Check system dependencies on startup"""
+    import shutil
+    
+    print("🔧 Checking system dependencies...")
+    
+    # Check FFmpeg
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path:
+        print(f"✅ FFmpeg found at: {ffmpeg_path}")
+        try:
+            result = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                version_line = result.stdout.split('\n')[0]
+                print(f"✅ FFmpeg version: {version_line}")
+            else:
+                print(f"⚠️ FFmpeg found but not working: {result.stderr}")
+        except Exception as e:
+            print(f"⚠️ FFmpeg check failed: {e}")
+    else:
+        print("❌ FFmpeg not found in PATH")
+        print("Available binaries:")
+        for path in ["/usr/bin", "/usr/local/bin", "/nix/store"]:
+            if os.path.exists(path):
+                print(f"  {path}: {os.listdir(path)[:5]}...")
+    
+    print("🚀 VR180 Backend startup completed")
+
 # Add custom CORS middleware
 @app.middleware("http")
 async def add_cors_headers(request, call_next):

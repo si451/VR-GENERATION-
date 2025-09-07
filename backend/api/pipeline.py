@@ -239,7 +239,7 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
                 try:
                     # Convert numpy array to PIL for depth estimation
                     img_pil = Image.fromarray(img_array)
-                    from api.models import create_local_depth_map
+                    from models import create_local_depth_map
                     depth_arr = create_local_depth_map(img_pil)
                     depth_arr = normalize_depth(depth_arr)
                     batch_depths.append(depth_arr)

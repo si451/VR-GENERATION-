@@ -13,8 +13,30 @@
 ### Step 2: Configure Service
 
 1. **Root Directory**: `backend`
-2. **Build Command**: `pip install -r requirements.txt`
-3. **Start Command**: `cd api && python -m uvicorn main:app --host 0.0.0.0 --port $PORT`
+2. **Build Command**: `pip install -r requirements.txt` (or leave empty - handled by nixpacks.toml)
+3. **Start Command**: `python -m uvicorn api.main:app --host 0.0.0.0 --port $PORT` (or leave empty - handled by nixpacks.toml)
+
+**Note**: The `nixpacks.toml` file automatically installs FFmpeg and handles the build process. The requirements.txt uses `opencv-python-headless` to avoid GUI library dependencies.
+
+### Step 2.1: Nixpacks Configuration
+
+The `nixpacks.toml` file in the backend directory configures Railway's build process:
+
+```toml
+[phases.setup]
+nixPkgs = ['ffmpeg']
+
+[phases.install]
+cmds = ['pip install -r requirements.txt']
+
+[phases.build]
+cmds = ['echo "Build completed"']
+
+[start]
+cmd = 'python -m uvicorn api.main:app --host 0.0.0.0 --port $PORT'
+```
+
+This ensures FFmpeg is installed during the build phase.
 
 ### Step 3: Environment Variables
 
