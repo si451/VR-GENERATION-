@@ -151,10 +151,17 @@ export function UploadInterface() {
   }
 
   const pollJobStatus = useCallback((jobId: string, fileId: string) => {
+    let lastStage = "queued"
+    let pollCount = 0
+    let maxIdlePolls = 20 // Stop polling after 20 idle checks (100 seconds)
+    
     const pollInterval = setInterval(async () => {
       try {
-        console.log(`Polling status for job ${jobId}...`)
-        const response = await fetch(`${API_BASE_URL}/status/${jobId}`)
+        pollCount++
+        console.log(`Smart polling status for job ${jobId} (attempt ${pollCount})...`)
+        
+        // Use stage transition endpoint for smart polling
+        const response = await fetch(`${API_BASE_URL}/status/${jobId}/stage-transitions`)
         
         if (!response.ok) {
           const errorText = await response.text()
@@ -162,52 +169,71 @@ export function UploadInterface() {
           throw new Error(`Failed to fetch status: ${response.status}`)
         }
 
-        const status = await response.json()
-        console.log(`Status for job ${jobId}:`, status)
+        const data = await response.json()
+        const status = data.status
+        const hasTransition = data.has_transition
         
-        setFiles((prev) =>
-          prev.map((f) => {
-            if (f.id === fileId) {
-              const progress = status.percent || 0
-              let newStatus: UploadedFile["status"] = "processing"
+        console.log(`Status for job ${jobId}:`, status, `Has transition: ${hasTransition}`)
+        
+        // Only update UI if there's a stage transition or if we haven't polled in a while
+        if (hasTransition || status.stage !== lastStage || pollCount % 5 === 0) {
+          lastStage = status.stage || "unknown"
+        
+          setFiles((prev) =>
+            prev.map((f) => {
+              if (f.id === fileId) {
+                const progress = status.percent || 0
+                let newStatus: UploadedFile["status"] = "processing"
 
-              if (status.status === "done") {
-                newStatus = "completed"
-                clearInterval(pollInterval)
-                // Show completion notification
-                toast({
-                  title: "Processing Complete!",
-                  description: `${f.name} has been successfully converted to VR180 format.`,
-                  duration: 5000,
-                })
-              } else if (status.status === "failed") {
-                newStatus = "error"
-                clearInterval(pollInterval)
-                // Show error notification
-                toast({
-                  title: "Processing Failed",
-                  description: `Failed to process ${f.name}: ${status.message || 'Unknown error'}`,
-                  variant: "destructive",
-                  duration: 5000,
-                })
+                if (status.status === "done") {
+                  newStatus = "completed"
+                  clearInterval(pollInterval)
+                  intervalsRef.current.delete(fileId)
+                  // Show completion notification
+                  toast({
+                    title: "Processing Complete!",
+                    description: `${f.name} has been successfully converted to VR180 format.`,
+                    duration: 5000,
+                  })
+                } else if (status.status === "failed") {
+                  newStatus = "error"
+                  clearInterval(pollInterval)
+                  intervalsRef.current.delete(fileId)
+                  // Show error notification
+                  toast({
+                    title: "Processing Failed",
+                    description: `Failed to process ${f.name}: ${status.message || 'Unknown error'}`,
+                    variant: "destructive",
+                    duration: 5000,
+                  })
+                }
+
+                return {
+                  ...f,
+                  progress,
+                  status: newStatus,
+                  vrUrl: status.output ? `${API_BASE_URL}/download/${jobId}` : undefined,
+                  errorMessage: status.message || status.error_message,
+                  currentStage: status.stage || status.current_stage,
+                  stageMessage: status.message || status.stage_message,
+                }
               }
-
-              return {
-                ...f,
-                progress,
-                status: newStatus,
-                vrUrl: status.output ? `${API_BASE_URL}/download/${jobId}` : undefined,
-                errorMessage: status.message || status.error_message,
-                currentStage: status.stage || status.current_stage,
-                stageMessage: status.message || status.stage_message,
-              }
-            }
-            return f
-          })
-        )
-
+              return f
+            })
+          )
+        }
+        
+        // Stop polling if job is done or failed
         if (status.status === "done" || status.status === "failed") {
           clearInterval(pollInterval)
+          intervalsRef.current.delete(fileId)
+        }
+        
+        // Stop polling if we've been idle too long (job might be stuck)
+        if (pollCount >= maxIdlePolls && status.status === "running") {
+          console.log(`Stopping polling for job ${jobId} after ${maxIdlePolls} idle checks`)
+          clearInterval(pollInterval)
+          intervalsRef.current.delete(fileId)
         }
       } catch (error) {
         console.error('Status polling error:', error)
@@ -224,7 +250,7 @@ export function UploadInterface() {
           )
         )
       }
-    }, 2000) // Poll every 2 seconds
+    }, 2000) // Poll every 2 seconds for stage transitions (much more efficient now)
 
     // Store interval reference for cleanup
     return pollInterval
@@ -306,6 +332,42 @@ export function UploadInterface() {
       default:
         return "Unknown"
     }
+  }
+
+  const getStageDisplayName = (stage: string): string => {
+    const stageMap: { [key: string]: string } = {
+      'queued': 'Queued for Processing',
+      'starting': 'Initializing',
+      'probe_video': 'Analyzing Video',
+      'extract_frames': 'Extracting Frames',
+      'depth_estimation': 'Estimating Depth',
+      'temporal_smoothing': 'Smoothing Motion',
+      'ldi_reprojection': 'Creating VR180 Views',
+      'encode': 'Encoding Final Video',
+      'finished': 'Completed'
+    }
+    return stageMap[stage] || stage.replace('_', ' ').toUpperCase()
+  }
+
+  const getStageProgress = (stage: string, percent: number): number => {
+    // Map stages to their progress ranges for better visual feedback
+    const stageRanges: { [key: string]: { min: number; max: number } } = {
+      'queued': { min: 0, max: 5 },
+      'starting': { min: 5, max: 10 },
+      'probe_video': { min: 10, max: 15 },
+      'extract_frames': { min: 15, max: 30 },
+      'depth_estimation': { min: 30, max: 55 },
+      'temporal_smoothing': { min: 55, max: 70 },
+      'ldi_reprojection': { min: 70, max: 90 },
+      'encode': { min: 90, max: 100 },
+      'finished': { min: 100, max: 100 }
+    }
+    
+    const range = stageRanges[stage] || { min: 0, max: 100 }
+    const stageProgress = Math.max(0, Math.min(100, percent))
+    
+    // Interpolate within the stage range
+    return range.min + (stageProgress / 100) * (range.max - range.min)
   }
 
   const getDetailedStatus = (file: UploadedFile) => {
@@ -505,9 +567,24 @@ export function UploadInterface() {
                       </div>
                       {file.currentStage && (
                         <div className="mt-2 text-sm text-primary/80 font-medium">
-                          Stage: {file.currentStage.replace('_', ' ').toUpperCase()}
+                          Stage: {getStageDisplayName(file.currentStage)}
                         </div>
                       )}
+                      <div className="mt-3">
+                        <div className="flex justify-between text-xs text-primary/60 mb-1">
+                          <span>Progress</span>
+                          <span>{Math.round(getStageProgress(file.currentStage || 'queued', file.progress || 0))}%</span>
+                        </div>
+                        <div className="w-full bg-primary/20 rounded-full h-2">
+                          <div 
+                            className="bg-primary h-2 rounded-full transition-all duration-500 ease-out"
+                            style={{ width: `${getStageProgress(file.currentStage || 'queued', file.progress || 0)}%` }}
+                          ></div>
+                        </div>
+                        <div className="mt-1 text-xs text-primary/50">
+                          Stage Progress: {file.progress || 0}% of {getStageDisplayName(file.currentStage || 'queued')}
+                        </div>
+                      </div>
                     </div>
                   )}
                   

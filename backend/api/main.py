@@ -342,15 +342,15 @@ async def upload(file: UploadFile = File(...)):
                             line = line.strip()
                             print(f"Worker output: {line}")
                             
-                            # Parse worker output and update status
+                            # Parse worker output and update status - only on stage transitions
                             if "Starting worker with job ID:" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"starting", "percent":1, "message":"Starting video processing..."})
+                                status_mgr.update(job_id, {"status":"running", "stage":"starting", "percent":1, "message":"Starting video processing...", "stage_started": True})
                             elif "Processing:" in line:
                                 status_mgr.update(job_id, {"status":"running", "stage":"starting", "percent":2, "message":"Processing video file..."})
                             elif "Copied input to:" in line or "Input already in job directory:" in line:
                                 status_mgr.update(job_id, {"status":"running", "stage":"starting", "percent":3, "message":"Preparing video for processing..."})
                             elif "FFprobe detected:" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"probe_video", "percent":5, "message":"Analyzing video properties..."})
+                                status_mgr.update(job_id, {"status":"running", "stage":"probe_video", "percent":5, "message":"Analyzing video properties...", "stage_started": True})
                             elif "Using FPS:" in line:
                                 status_mgr.update(job_id, {"status":"running", "stage":"probe_video", "percent":7, "message":"Detecting frame rate..."})
                             elif "Video duration:" in line:
@@ -358,69 +358,69 @@ async def upload(file: UploadFile = File(...)):
                             elif "Expected total frames:" in line:
                                 status_mgr.update(job_id, {"status":"running", "stage":"probe_video", "percent":10, "message":"Calculating total frames..."})
                             elif "Extracting frames with high quality settings..." in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"extract_frames", "percent":15, "message":"Extracting video frames..."})
+                                status_mgr.update(job_id, {"status":"running", "stage":"extract_frames", "percent":15, "message":"Extracting video frames...", "stage_started": True})
                             elif "Extracting frames:" in line and "%" in line:
                                 # Extract progress from tqdm output like "Extracting frames: 45%|████▌     | 647/1437 [00:08<00:10, 73.28frame/s]"
                                 import re
                                 progress_match = re.search(r'(\d+)%', line)
                                 if progress_match:
                                     progress = int(progress_match.group(1))
-                                    # Only update every 10% to reduce file locking issues
-                                    if progress % 10 == 0 or progress >= 95:
+                                    # Only update every 20% to reduce file locking issues
+                                    if progress % 20 == 0 or progress >= 95:
                                         # Map 0-100% to 15-25% of total progress
                                         total_progress = 15 + int(progress * 0.1)
                                         status_mgr.update(job_id, {"status":"running", "stage":"extract_frames", "percent":total_progress, "message":f"Extracting frames... {progress}%"})
                             elif "Extracted" in line and "frames successfully" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"extract_frames", "percent":25, "message":"Frame extraction completed"})
+                                status_mgr.update(job_id, {"status":"running", "stage":"extract_frames", "percent":25, "message":"Frame extraction completed", "stage_completed": True})
                             elif "Total frames extracted:" in line:
                                 status_mgr.update(job_id, {"status":"running", "stage":"extract_frames", "percent":27, "message":"Frame extraction verified"})
                             elif "Starting depth estimation" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":30, "message":"Starting depth estimation..."})
+                                status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":30, "message":"Starting depth estimation...", "stage_started": True})
                             elif "Depth estimation:" in line and "%" in line:
                                 # Extract progress from tqdm output
                                 import re
                                 progress_match = re.search(r'(\d+)%', line)
                                 if progress_match:
                                     progress = int(progress_match.group(1))
-                                    # Only update every 20% to reduce file locking issues
-                                    if progress % 20 == 0 or progress >= 95:
+                                    # Only update every 25% to reduce file locking issues
+                                    if progress % 25 == 0 or progress >= 95:
                                         # Map 0-100% to 30-50% of total progress
                                         total_progress = 30 + int(progress * 0.2)
                                         status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":total_progress, "message":f"Estimating depth maps... {progress}%"})
                             elif "Depth estimation completed" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":50, "message":"Depth estimation completed"})
+                                status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":50, "message":"Depth estimation completed", "stage_completed": True})
                             elif "Starting temporal smoothing" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":55, "message":"Starting temporal smoothing..."})
+                                status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":55, "message":"Starting temporal smoothing...", "stage_started": True})
                             elif "Temporal smoothing:" in line and "%" in line:
                                 # Extract progress from tqdm output
                                 import re
                                 progress_match = re.search(r'(\d+)%', line)
                                 if progress_match:
                                     progress = int(progress_match.group(1))
-                                    # Only update every 20% to reduce file locking issues
-                                    if progress % 20 == 0 or progress >= 95:
+                                    # Only update every 25% to reduce file locking issues
+                                    if progress % 25 == 0 or progress >= 95:
                                         # Map 0-100% to 55-65% of total progress
                                         total_progress = 55 + int(progress * 0.1)
                                         status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":total_progress, "message":f"Applying temporal smoothing... {progress}%"})
                             elif "Temporal smoothing completed" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":65, "message":"Temporal smoothing completed"})
+                                status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":65, "message":"Temporal smoothing completed", "stage_completed": True})
                             elif "Starting LDI reprojection and inpainting" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":70, "message":"Starting VR180 view creation..."})
+                                status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":70, "message":"Starting VR180 view creation...", "stage_started": True})
                             elif "LDI & Inpainting:" in line and "%" in line:
                                 # Extract progress from tqdm output
                                 import re
                                 progress_match = re.search(r'(\d+)%', line)
                                 if progress_match:
                                     progress = int(progress_match.group(1))
-                                    # Only update every 20% to reduce file locking issues
-                                    if progress % 20 == 0 or progress >= 95:
+                                    # Only update every 25% to reduce file locking issues
+                                    if progress % 25 == 0 or progress >= 95:
                                         # Map 0-100% to 70-85% of total progress
                                         total_progress = 70 + int(progress * 0.15)
                                         status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":total_progress, "message":f"Creating VR180 views... {progress}%"})
                             elif "LDI reprojection and inpainting completed" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":85, "message":"VR180 reprojection completed"})
+                                status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":85, "message":"VR180 reprojection completed", "stage_completed": True})
                             elif "Creating final VR180 video" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":90, "message":"Creating final VR180 video..."})
+                                status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":90, "message":"Creating final VR180 video...", "stage_started": True})
                             elif "Creating side-by-side video" in line:
                                 status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":92, "message":"Creating side-by-side video..."})
                             elif "Encoding video with high quality settings..." in line:
@@ -437,9 +437,9 @@ async def upload(file: UploadFile = File(...)):
                                 else:
                                     status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":99, "message":"Final video created"})
                             elif "Job" in line and "completed successfully" in line:
-                                status_mgr.update(job_id, {"status":"done", "stage":"finished", "percent":100, "message":"Video processing completed successfully!"})
+                                status_mgr.update(job_id, {"status":"done", "stage":"finished", "percent":100, "message":"Video processing completed successfully!", "stage_completed": True})
                             elif "Results saved in:" in line:
-                                status_mgr.update(job_id, {"status":"done", "stage":"finished", "percent":100, "message":"Processing completed! Results saved."})
+                                status_mgr.update(job_id, {"status":"done", "stage":"finished", "percent":100, "message":"Processing completed! Results saved.", "stage_completed": True})
                             elif "failed" in line.lower() or "error" in line.lower():
                                 status_mgr.update(job_id, {"status":"failed", "message":line})
         
@@ -465,6 +465,26 @@ async def upload(file: UploadFile = File(...)):
 @app.get("/status/{job_id}")
 async def get_status(job_id: str):
     return status_mgr.read(job_id)
+
+@app.get("/status/{job_id}/stage-transitions")
+async def get_stage_transitions(job_id: str):
+    """Get stage transition events for smart polling"""
+    status = status_mgr.read(job_id)
+    
+    # Check if there's a stage transition
+    if status.get("stage_started") or status.get("stage_completed"):
+        # Clear the flags after reading
+        if status.get("stage_started"):
+            status_mgr.update(job_id, {"stage_started": False})
+        if status.get("stage_completed"):
+            status_mgr.update(job_id, {"stage_completed": False})
+        
+        return {
+            "has_transition": True,
+            "status": status
+        }
+    
+    return {"has_transition": False, "status": status}
 
 @app.get("/jobs")
 async def list_jobs():
@@ -575,7 +595,7 @@ async def ws_job(websocket: WebSocket, job_id: str):
     conns.add(websocket)
     try:
         while True:
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(5.0)  # Reduced from 1 second to 5 seconds
             # push status file periodically
             status = status_mgr.read(job_id)
             await websocket.send_json(status)
