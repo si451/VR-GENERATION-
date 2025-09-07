@@ -13,8 +13,8 @@ from pathlib import Path
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
-from api.pipeline import process_job
-from api.config import WORKSPACE_DIR
+from pipeline import process_job
+from config import WORKSPACE_DIR
 
 def main():
     if len(sys.argv) != 3:
