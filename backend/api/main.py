@@ -119,7 +119,7 @@ def keep_alive_ping():
     while True:
         try:
             # Get the server URL from environment or use localhost
-            server_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8080")
+            server_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000")
             
             # Ping the health endpoint
             response = requests.get(f"{server_url}/health", timeout=10)
