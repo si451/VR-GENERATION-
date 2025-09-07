@@ -590,7 +590,7 @@ def process_video_parallel(job_id: str, input_path: str, output_path: str,
         ldi_queue = queue.Queue(maxsize=50)
         
         # Start parallel workers using ThreadPoolExecutor (queues work with threads)
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=7) as executor:
             # Submit parallel tasks with job_id and status_mgr for progress updates
             depth_future = executor.submit(process_depth_parallel, frame_dir, n_frames, depth_queue, job_id, status_mgr)
             temporal_future = executor.submit(process_temporal_parallel, depth_queue, n_frames, ldi_queue, job_id, status_mgr)
