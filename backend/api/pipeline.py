@@ -591,10 +591,10 @@ def process_video_parallel(job_id: str, input_path: str, output_path: str,
         
         # Start parallel workers using ThreadPoolExecutor (queues work with threads)
         with ThreadPoolExecutor(max_workers=4) as executor:
-            # Submit parallel tasks
-            depth_future = executor.submit(process_depth_parallel, frame_dir, n_frames, depth_queue)
-            temporal_future = executor.submit(process_temporal_parallel, depth_queue, n_frames, ldi_queue)
-            ldi_future = executor.submit(process_ldi_parallel, ldi_queue, n_frames, workspace)
+            # Submit parallel tasks with job_id and status_mgr for progress updates
+            depth_future = executor.submit(process_depth_parallel, frame_dir, n_frames, depth_queue, job_id, status_mgr)
+            temporal_future = executor.submit(process_temporal_parallel, depth_queue, n_frames, ldi_queue, job_id, status_mgr)
+            ldi_future = executor.submit(process_ldi_parallel, ldi_queue, n_frames, workspace, job_id, status_mgr)
             
             # Monitor progress
             monitor_parallel_progress(job_id, status_mgr, depth_future, temporal_future, ldi_future)
@@ -631,7 +631,7 @@ def extract_frames_streaming(input_path: str, frame_dir: Path, n_frames: int):
     
     subprocess.run(cmd, check=True, capture_output=True)
 
-def process_depth_parallel(frame_dir: Path, n_frames: int, depth_queue: queue.Queue):
+def process_depth_parallel(frame_dir: Path, n_frames: int, depth_queue: queue.Queue, job_id: str = None, status_mgr = None):
     """Process depth estimation in parallel with memory streaming"""
     print("🧠 Starting parallel depth estimation...")
     
@@ -652,8 +652,20 @@ def process_depth_parallel(frame_dir: Path, n_frames: int, depth_queue: queue.Qu
             del img, depth_map
             gc.collect()
             
-            if (i + 1) % 100 == 0:
+            # Update progress every 50 frames
+            if (i + 1) % 50 == 0:
+                progress = 10 + int(40.0 * (i + 1) / n_frames)
                 print(f"✅ Processed {i + 1}/{n_frames} frames for depth")
+                if status_mgr and job_id:
+                    try:
+                        status_mgr.update(job_id, {
+                            "status": "running", 
+                            "stage": "depth_estimation", 
+                            "percent": progress,
+                            "message": f"Processing depth maps... {i + 1}/{n_frames} frames"
+                        })
+                    except:
+                        pass
                 
         except Exception as e:
             print(f"❌ Depth processing error for frame {i}: {e}")
@@ -663,7 +675,7 @@ def process_depth_parallel(frame_dir: Path, n_frames: int, depth_queue: queue.Qu
     # Signal completion
     depth_queue.put(None)
 
-def process_temporal_parallel(depth_queue: queue.Queue, n_frames: int, ldi_queue: queue.Queue):
+def process_temporal_parallel(depth_queue: queue.Queue, n_frames: int, ldi_queue: queue.Queue, job_id: str = None, status_mgr = None):
     """Process temporal smoothing in parallel with memory streaming"""
     print("⏱️ Starting parallel temporal smoothing...")
     
@@ -695,6 +707,21 @@ def process_temporal_parallel(depth_queue: queue.Queue, n_frames: int, ldi_queue
                 
             processed += 1
             
+            # Update progress every 100 processed frames
+            if processed % 100 == 0:
+                progress = 50 + int(20.0 * processed / n_frames)
+                print(f"✅ Temporal smoothing: {processed}/{n_frames} frames")
+                if status_mgr and job_id:
+                    try:
+                        status_mgr.update(job_id, {
+                            "status": "running", 
+                            "stage": "temporal_smoothing", 
+                            "percent": progress,
+                            "message": f"Applying temporal smoothing... {processed}/{n_frames} frames"
+                        })
+                    except:
+                        pass
+            
         except queue.Empty:
             print("⚠️ Timeout waiting for depth data")
             break
@@ -702,7 +729,7 @@ def process_temporal_parallel(depth_queue: queue.Queue, n_frames: int, ldi_queue
     # Signal completion
     ldi_queue.put(None)
 
-def process_ldi_parallel(ldi_queue: queue.Queue, n_frames: int, workspace: Path):
+def process_ldi_parallel(ldi_queue: queue.Queue, n_frames: int, workspace: Path, job_id: str = None, status_mgr = None):
     """Process LDI generation in parallel with memory streaming"""
     print("🎭 Starting parallel LDI generation...")
     
@@ -727,8 +754,20 @@ def process_ldi_parallel(ldi_queue: queue.Queue, n_frames: int, workspace: Path)
             
             processed += 1
             
+            # Update progress every 100 processed frames
             if processed % 100 == 0:
+                progress = 70 + int(20.0 * processed / n_frames)
                 print(f"✅ Generated {processed}/{n_frames} LDI frames")
+                if status_mgr and job_id:
+                    try:
+                        status_mgr.update(job_id, {
+                            "status": "running", 
+                            "stage": "ldi_generation", 
+                            "percent": progress,
+                            "message": f"Creating VR180 views... {processed}/{n_frames} frames"
+                        })
+                    except:
+                        pass
                 
         except queue.Empty:
             print("⚠️ Timeout waiting for LDI data")
