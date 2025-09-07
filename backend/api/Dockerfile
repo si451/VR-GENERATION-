@@ -30,12 +30,8 @@ RUN mkdir -p /app/workspace \
     && python --version \
     && ffmpeg -version
 
-# Expose port
-EXPOSE 8080
-
 # Set environment variables
-ENV PORT=8080
 ENV WORKSPACE_DIR=/app/workspace
 
 # Start command
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "$PORT"]
