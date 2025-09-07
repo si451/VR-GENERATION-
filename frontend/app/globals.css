@@ -1,0 +1,210 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&family=Poppins:wght@100;200;300;400;500;600;700;800;900&family=JetBrains+Mono:wght@100;200;300;400;500;600;700;800&display=swap');
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Reverted to black theme with green accents */
+  --background: oklch(0.05 0 0); /* Dark background */
+  --foreground: oklch(0.95 0 0); /* Light text */
+  --card: oklch(0.08 0 0); /* Dark card background */
+  --card-foreground: oklch(0.9 0 0); /* Light card text */
+  --popover: oklch(0.08 0 0); /* Dark popover background */
+  --popover-foreground: oklch(0.95 0 0); /* Light popover text */
+  --primary: oklch(0.55 0.15 160); /* Emerald primary color */
+  --primary-foreground: oklch(0.05 0 0); /* Dark text on primary */
+  --secondary: oklch(0.65 0.15 160); /* Lighter emerald secondary */
+  --secondary-foreground: oklch(0.05 0 0); /* Dark text on secondary */
+  --muted: oklch(0.12 0 0); /* Dark muted background */
+  --muted-foreground: oklch(0.6 0 0); /* Medium gray muted text */
+  --accent: oklch(0.65 0.15 160); /* Bright emerald accent */
+  --accent-foreground: oklch(0.05 0 0); /* Dark text on accent */
+  --destructive: oklch(0.6 0.2 25); /* Orange for destructive actions */
+  --destructive-foreground: oklch(0.95 0 0); /* Light text on destructive */
+  --border: oklch(0.2 0 0); /* Dark borders */
+  --input: oklch(0.08 0 0); /* Dark input backgrounds */
+  --ring: oklch(0.55 0.15 160 / 0.5); /* Emerald focus ring */
+  --chart-1: oklch(0.55 0.15 160); /* Emerald for charts */
+  --chart-2: oklch(0.65 0.15 160); /* Light emerald for charts */
+  --chart-3: oklch(0.6 0.2 25); /* Orange for charts */
+  --chart-4: oklch(0.6 0.2 280); /* Purple for charts */
+  --chart-5: oklch(0.65 0.2 30); /* Orange for charts */
+  --radius: 0.75rem;
+  --sidebar: oklch(0.03 0 0); /* Very dark sidebar */
+  --sidebar-foreground: oklch(0.9 0 0); /* Light sidebar text */
+  --sidebar-primary: oklch(0.55 0.15 160); /* Emerald sidebar primary */
+  --sidebar-primary-foreground: oklch(0.05 0 0); /* Dark text on sidebar primary */
+  --sidebar-accent: oklch(0.65 0.15 160); /* Emerald sidebar accent */
+  --sidebar-accent-foreground: oklch(0.05 0 0); /* Dark text on sidebar accent */
+  --sidebar-border: oklch(0.2 0 0); /* Dark sidebar borders */
+  --sidebar-ring: oklch(0.55 0.15 160 / 0.5); /* Emerald sidebar focus ring */
+}
+
+.dark {
+  /* Same as root for consistent dark theme */
+  --background: oklch(0.05 0 0);
+  --foreground: oklch(0.95 0 0);
+  --card: oklch(0.08 0 0);
+  --card-foreground: oklch(0.9 0 0);
+  --popover: oklch(0.08 0 0);
+  --popover-foreground: oklch(0.95 0 0);
+  --primary: oklch(0.55 0.15 160);
+  --primary-foreground: oklch(0.05 0 0);
+  --secondary: oklch(0.65 0.15 160);
+  --secondary-foreground: oklch(0.05 0 0);
+  --muted: oklch(0.12 0 0);
+  --muted-foreground: oklch(0.6 0 0);
+  --accent: oklch(0.65 0.15 160);
+  --accent-foreground: oklch(0.05 0 0);
+  --destructive: oklch(0.6 0.2 25);
+  --destructive-foreground: oklch(0.95 0 0);
+  --border: oklch(0.2 0 0);
+  --input: oklch(0.08 0 0);
+  --ring: oklch(0.55 0.15 160 / 0.5);
+  --chart-1: oklch(0.55 0.15 160);
+  --chart-2: oklch(0.65 0.15 160);
+  --chart-3: oklch(0.6 0.2 25);
+  --chart-4: oklch(0.6 0.2 280);
+  --chart-5: oklch(0.65 0.2 30);
+  --sidebar: oklch(0.03 0 0);
+  --sidebar-foreground: oklch(0.9 0 0);
+  --sidebar-primary: oklch(0.55 0.15 160);
+  --sidebar-primary-foreground: oklch(0.05 0 0);
+  --sidebar-accent: oklch(0.65 0.15 160);
+  --sidebar-accent-foreground: oklch(0.05 0 0);
+  --sidebar-border: oklch(0.2 0 0);
+  --sidebar-ring: oklch(0.55 0.15 160 / 0.5);
+}
+
+@theme inline {
+  /* Enhanced typography with multiple font families */
+  --font-sans: "Inter", "SF Pro Display", "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "Monaco", "Consolas", monospace;
+  --font-display: "Poppins", "Inter", "SF Pro Display", sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  
+  /* Enhanced typography hierarchy */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display font-bold tracking-tight;
+  }
+  
+  h1 {
+    @apply text-5xl md:text-6xl lg:text-7xl;
+  }
+  
+  h2 {
+    @apply text-3xl md:text-4xl lg:text-5xl;
+  }
+  
+  h3 {
+    @apply text-2xl md:text-3xl;
+  }
+  
+  h4 {
+    @apply text-xl md:text-2xl;
+  }
+  
+  p {
+    @apply leading-relaxed;
+  }
+  
+  /* Custom text styles for better readability */
+  .text-display {
+    @apply font-display font-bold tracking-tight;
+  }
+  
+  .text-body {
+    @apply font-sans leading-relaxed;
+  }
+  
+  .text-caption {
+    @apply text-sm font-medium opacity-80;
+  }
+}
+
+/* Performance optimizations */
+@layer utilities {
+  .animate-glow {
+    animation: glow 2s ease-in-out infinite alternate;
+  }
+  
+  /* Optimize animations for better performance */
+  .transition-all {
+    transition-property: all;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+  }
+  
+  /* Hardware acceleration for smooth animations */
+  .transform {
+    transform: translateZ(0);
+    will-change: transform;
+  }
+  
+  .backdrop-blur-sm {
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  
+  .backdrop-blur-lg {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+  
+  .backdrop-blur-xl {
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+}
+
+@keyframes glow {
+  from { box-shadow: 0 0 5px rgba(34, 197, 94, 0.5); }
+  to { box-shadow: 0 0 20px rgba(34, 197, 94, 0.8), 0 0 30px rgba(34, 197, 94, 0.6); }
+}
+
+/* Removed all background animations - only Saturn video background */
