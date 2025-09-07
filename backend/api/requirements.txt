@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+requests
+pillow
+numpy
+opencv-python
+opencv-contrib-python
+huggingface-hub
+python-multipart
+aiofiles
+tqdm
+python-dotenv
