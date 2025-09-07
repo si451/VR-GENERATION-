@@ -12,11 +12,45 @@ from PIL import Image
 
 # from .config import FFMPEG_BIN
 FFMPEG_BIN = os.getenv("FFMPEG_BIN", "ffmpeg")
+
+def find_ffmpeg():
+    """Find FFmpeg binary with fallback options"""
+    import shutil
+    
+    # Try the environment variable first
+    if FFMPEG_BIN and FFMPEG_BIN != "ffmpeg":
+        return FFMPEG_BIN
+    
+    # Try common paths
+    common_paths = [
+        "ffmpeg",
+        "/usr/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        "/nix/store/*/bin/ffmpeg"
+    ]
+    
+    for path in common_paths:
+        if shutil.which(path):
+            return path
+    
+    # If not found, return the default
+    return "ffmpeg"
+
+# Use the found FFmpeg binary
+FFMPEG_BIN = find_ffmpeg()
 def run_cmd_sync(cmd: str, timeout: int = 3600):
     """Synchronous command runner for Windows compatibility"""
+    print(f"🔧 Running command: {cmd}")
+    print(f"🔧 Using FFmpeg binary: {FFMPEG_BIN}")
+    
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+    
     if result.returncode != 0:
-        raise RuntimeError(f"Command failed: {cmd}\nSTDERR: {result.stderr}")
+        print(f"❌ Command failed with return code: {result.returncode}")
+        print(f"❌ STDOUT: {result.stdout}")
+        print(f"❌ STDERR: {result.stderr}")
+        raise RuntimeError(f"Command failed: {cmd}\nReturn code: {result.returncode}\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}")
+    
     return result.stdout, result.stderr
 
 async def run_cmd(cmd: str, timeout: int = 3600):
@@ -184,7 +218,7 @@ def probe_video(video_path: Path) -> dict:
                             streams.append({
                                 "codec_type": "audio",
                                 "codec_name": stream.get('codec_name', 'aac'),
-                                "sample_rate": stream.get('sample_rate', '48000'),
+                                "samgit push -u origin mainple_rate": stream.get('sample_rate', '48000'),
                                 "channels": stream.get('channels', 2)
                             })
                             print(f"Audio stream found: {stream.get('codec_name', 'unknown')} at {stream.get('sample_rate', 'unknown')}Hz")
