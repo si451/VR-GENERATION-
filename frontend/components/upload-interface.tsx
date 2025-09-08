@@ -99,6 +99,9 @@ export function UploadInterface() {
       const response = await fetch(`${API_BASE_URL}/upload`, {
         method: 'POST',
         body: formData,
+        headers: {
+          'Accept': 'application/json',
+        },
       })
 
       if (!response.ok) {
@@ -164,7 +167,11 @@ export function UploadInterface() {
         pollCount++
         
         // Use stage transition endpoint for smart polling
-        const response = await fetch(`${API_BASE_URL}/status/${jobId}/stage-transitions`)
+        const response = await fetch(`${API_BASE_URL}/status/${jobId}/stage-transitions`, {
+          headers: {
+            'Accept': 'application/json',
+          },
+        })
         
         if (!response.ok) {
           const errorText = await response.text()
@@ -176,18 +183,8 @@ export function UploadInterface() {
         const status = data.status
         const hasTransition = data.has_transition
         
-        console.log('Received status:', { status, hasTransition, data })
-        
         // Only update UI on stage transitions (start/end of stages)
         if (hasTransition || status.stage !== lastStage) {
-          console.log('Stage transition detected:', { 
-            hasTransition, 
-            oldStage: lastStage, 
-            newStage: status.stage, 
-            status: status.status,
-            message: status.message,
-            percent: status.percent 
-          })
           lastStage = status.stage || "unknown"
           lastProgress = status.percent || 0
         
@@ -370,17 +367,17 @@ export function UploadInterface() {
 
   const getStageDisplayName = (stage: string): string => {
     const stageMap: { [key: string]: string } = {
-      'queued': 'Queued for Processing',
-      'starting': 'Initializing',
-      'probe_video': 'Analyzing Video',
+      'queued': 'Queued',
+      'starting': 'Starting',
+      'probe_video': 'Analyzing',
       'extract_frames': 'Extracting Frames',
-      'depth_estimation': 'Estimating Depth',
-      'temporal_smoothing': 'Smoothing Motion',
-      'ldi_reprojection': 'Creating VR180 Views',
-      'encode': 'Encoding Final Video',
+      'depth_estimation': 'Processing Depth',
+      'temporal_smoothing': 'Smoothing',
+      'ldi_reprojection': 'Creating VR180',
+      'encode': 'Finalizing',
       'finished': 'Completed'
     }
-    return stageMap[stage] || stage.replace('_', ' ').toUpperCase()
+    return stageMap[stage] || 'Processing'
   }
 
   const getStageProgress = (stage: string, percent: number): number => {
@@ -407,28 +404,26 @@ export function UploadInterface() {
   const getDetailedStatus = (file: UploadedFile) => {
     if (file.status === "processing") {
       const stage = file.currentStage || "processing"
-      const message = file.stageMessage || ""
       
-      // Map stage names to user-friendly descriptions
+      // Simple stage descriptions without technical details
       const stageMap: { [key: string]: string } = {
         "starting": "🚀 Starting video processing...",
-        "probe_video": "📊 Analyzing video properties...",
-        "extract_frames": "🎬 Extracting video frames...",
-        "depth_estimation": "🧠 Estimating depth maps...",
-        "temporal_smoothing": "🔄 Applying temporal smoothing...",
+        "probe_video": "📊 Analyzing video...",
+        "extract_frames": "🎬 Extracting frames...",
+        "depth_estimation": "🧠 Processing depth...",
+        "temporal_smoothing": "🔄 Smoothing motion...",
         "ldi_reprojection": "🎭 Creating VR180 views...",
-        "encode": "🎬 Encoding final video...",
-        "finished": "✅ Video processing completed!",
-        "frame_extraction": "🎬 Extracting frames from video...",
-        "ldi_creation": "👁️ Creating stereo views...",
-        "inpainting": "🎨 Filling gaps with AI inpainting...",
-        "interpolation": "⚡ Adding frame interpolation...",
-        "encoding": "🎥 Encoding final VR180 video...",
-        "finalizing": "✨ Adding VR180 metadata..."
+        "encode": "🎬 Finalizing video...",
+        "finished": "✅ Processing completed!",
+        "frame_extraction": "🎬 Extracting frames...",
+        "ldi_creation": "🎭 Creating VR180 views...",
+        "inpainting": "🎨 Processing views...",
+        "interpolation": "⚡ Finalizing...",
+        "encoding": "🎥 Finalizing video...",
+        "finalizing": "✨ Completing..."
       }
       
-      const stageDescription = stageMap[stage] || `Processing: ${stage}`
-      return message || stageDescription
+      return stageMap[stage] || "Processing video..."
     }
     return null
   }
@@ -616,7 +611,7 @@ export function UploadInterface() {
                           ></div>
                         </div>
                         <div className="mt-1 text-xs text-primary/50">
-                          Stage Progress: {file.progress || 0}% of {getStageDisplayName(file.currentStage || 'queued')}
+                          {getStageDisplayName(file.currentStage || 'queued')} - {file.progress || 0}%
                         </div>
                       </div>
                     </div>

@@ -98,8 +98,9 @@ async def add_cors_headers(request, call_next):
     # Add CORS headers to all responses
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, HEAD"
-    response.headers["Access-Control-Allow-Headers"] = "Range, Content-Range, Content-Length, Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Headers"] = "Range, Content-Range, Content-Length, Content-Type, Authorization, X-Requested-With"
     response.headers["Access-Control-Expose-Headers"] = "Content-Range, Accept-Ranges, Content-Length"
+    response.headers["Access-Control-Max-Age"] = "86400"
     
     return response
 
@@ -170,6 +171,11 @@ async def startup_event():
     """Startup event to ensure keep-alive is running"""
     print("🚀 VR180 Backend started successfully")
     print("💡 Ready to process VR180 videos")
+
+@app.options("/{path:path}")
+async def options_handler(path: str):
+    """Handle CORS preflight requests"""
+    return {"message": "OK"}
 
 @app.get("/health")
 async def health_check():
