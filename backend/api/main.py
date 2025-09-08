@@ -285,6 +285,7 @@ def save_upload_stream(upload: UploadFile, target: Path, size_limit: int = MAX_U
 
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
+    job_id = None
     try:
         job_id = uuid.uuid4().hex
         job_dir = WORKSPACE_DIR / job_id
@@ -302,6 +303,13 @@ async def upload(file: UploadFile = File(...)):
         print(f"✅ File saved successfully to: {input_path}")
     except Exception as e:
         print(f"❌ Upload error: {e}")
+        import traceback
+        traceback.print_exc()
+        if job_id:
+            try:
+                status_mgr.update(job_id, {"status":"failed", "message":f"Upload failed: {str(e)}"})
+            except:
+                pass
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
     
     # quick probe and limit
@@ -428,9 +436,15 @@ async def upload(file: UploadFile = File(...)):
             status_mgr.update(job_id, {"status":"failed", "message":f"Worker start failed: {e}"})
     
     # Start worker in background
-    await loop.run_in_executor(None, start_worker)
-    
-    return {"job_id": job_id}
+    try:
+        await loop.run_in_executor(None, start_worker)
+        return {"job_id": job_id, "status": "queued", "message": "Upload successful, processing started"}
+    except Exception as e:
+        print(f"❌ Worker start error: {e}")
+        import traceback
+        traceback.print_exc()
+        status_mgr.update(job_id, {"status":"failed", "message":f"Failed to start processing: {str(e)}"})
+        return {"job_id": job_id, "status": "error", "message": f"Failed to start processing: {str(e)}"}
 
 @app.get("/status/{job_id}")
 async def get_status(job_id: str):
