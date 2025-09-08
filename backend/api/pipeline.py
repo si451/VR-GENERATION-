@@ -236,9 +236,15 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     frame_files = sorted(frames_down.glob("frame_*.png"))
     n_frames = len(frame_files)
     print(f"Total frames extracted: {n_frames}")
-    status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":10, "frames": n_frames})
-
-    # Enhanced batch depth estimation
+    # Stage 1: Depth Estimation - START
+    status_mgr.update(job_id, {
+        "status":"running", 
+        "stage":"depth_estimation", 
+        "percent":10, 
+        "frames": n_frames,
+        "message":"Starting depth estimation... (Estimated time: 15-20 minutes)",
+        "stage_started": True
+    })
     print(f"Starting depth estimation for {n_frames} frames...")
     depths = []
     
@@ -295,19 +301,7 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
                     # Update progress bar
                     pbar.update(1)
                     
-                    # Update status every 10% progress to reduce API calls
-                    current_progress = 10 + int(40.0 * (chunk_start + i + 1) / n_frames)
-                    if current_progress % 10 == 0 and current_progress != last_progress:
-                        last_progress = current_progress
-                        try:
-                            status_mgr.update(job_id, {
-                                "status":"running", 
-                                "stage":"depth_estimation", 
-                                "percent":current_progress,
-                                "message":f"Estimating depth maps... {chunk_start + i + 1}/{n_frames} frames"
-                            })
-                        except Exception as e:
-                            print(f"⚠️  Status update failed: {e}")
+                    # No intermediate progress updates - only stage start/end
                         
                 except (Exception, TimeoutError) as e:
                     print(f"❌ Depth estimation failed for frame {chunk_start + i + 1}: {e}")
@@ -328,7 +322,24 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     print(f"Depth estimation completed for {len(depths)} frames")
     # Free memory after depth estimation
     gc.collect()
-    status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":52})
+    
+    # Stage 1: Depth Estimation - END
+    status_mgr.update(job_id, {
+        "status":"running", 
+        "stage":"depth_estimation", 
+        "percent":50, 
+        "message":"Depth estimation completed. Starting temporal smoothing...",
+        "stage_completed": True
+    })
+    
+    # Stage 2: Temporal Smoothing - START
+    status_mgr.update(job_id, {
+        "status":"running", 
+        "stage":"temporal_smoothing", 
+        "percent":52,
+        "message":"Starting temporal smoothing... (Estimated time: 5-8 minutes)",
+        "stage_started": True
+    })
     # Memory-efficient temporal smoothing with on-the-fly flow computation
     print(f"Starting temporal smoothing...")
     depths_smoothed = []
@@ -375,19 +386,7 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
                 flow_cur_to_prev = np.zeros((h, w, 2), dtype=np.float32)
                 flow_cur_to_next = np.zeros_like(flow_cur_to_prev)
             
-            # Update progress every 10% progress
-            current_progress = 52 + int(8.0 * i / n_frames)
-            if current_progress % 10 == 0 and current_progress != last_progress:
-                last_progress = current_progress
-                try:
-                    status_mgr.update(job_id, {
-                        "status":"running", 
-                        "stage":"temporal_smoothing", 
-                        "percent":current_progress,
-                        "message":f"Applying temporal smoothing... {i+1}/{n_frames} frames"
-                    })
-                except Exception as e:
-                    print(f"⚠️  Status update failed: {e}")
+            # No intermediate progress updates - only stage start/end
             
             # Ensure flow dimensions match depth dimensions
             if flow_cur_to_prev.shape[:2] != depth_cur.shape[:2]:
@@ -474,8 +473,24 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     print(f"Temporal smoothing completed")
     # Free memory after temporal smoothing
     gc.collect()
-
-    status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":65})
+    
+    # Stage 2: Temporal Smoothing - END
+    status_mgr.update(job_id, {
+        "status":"running", 
+        "stage":"temporal_smoothing", 
+        "percent":65,
+        "message":"Temporal smoothing completed. Starting VR180 view creation...",
+        "stage_completed": True
+    })
+    
+    # Stage 3: LDI Reprojection - START
+    status_mgr.update(job_id, {
+        "status":"running", 
+        "stage":"ldi_reprojection", 
+        "percent":65,
+        "message":"Starting VR180 view creation... (Estimated time: 8-12 minutes)",
+        "stage_started": True
+    })
     # Enhanced batch LDI reprojection and inpainting
     print(f"Starting VR180 view creation...")
     
@@ -535,23 +550,27 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
 
                 pbar.update(1)
             
-            # Update status every 10% progress
-            current_progress = 65 + int(20.0 * batch_end / n_frames)
-            if current_progress % 10 == 0 and current_progress != last_progress:
-                last_progress = current_progress
-                try:
-                    status_mgr.update(job_id, {
-                        "status":"running", 
-                        "stage":"ldi_reprojection", 
-                        "percent":current_progress,
-                        "message":f"Creating VR180 views... {batch_end}/{n_frames} frames"
-                    })
-                except Exception as e:
-                    print(f"⚠️  Status update failed: {e}")
+            # No intermediate progress updates - only stage start/end
     
     print(f"LDI reprojection and inpainting completed")
-
-    status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":88})
+    
+    # Stage 3: LDI Reprojection - END
+    status_mgr.update(job_id, {
+        "status":"running", 
+        "stage":"ldi_reprojection", 
+        "percent":85,
+        "message":"VR180 view creation completed. Starting final video encoding...",
+        "stage_completed": True
+    })
+    
+    # Stage 4: Final Encoding - START
+    status_mgr.update(job_id, {
+        "status":"running", 
+        "stage":"encode", 
+        "percent":88,
+        "message":"Starting final video encoding... (Estimated time: 2-3 minutes)",
+        "stage_started": True
+    })
     out_path = job_dir / f"{job_id}_sbs.mp4"
     
     # Count frames for verification
@@ -571,8 +590,15 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     else:
         print(f"Output video was not created!")
     
-    # Update status with output path
-    status_mgr.update(job_id, {"status":"done", "stage":"finished", "percent":100, "output": str(out_path), "message": "Video processing completed successfully!"})
+    # Stage 4: Final Encoding - END
+    status_mgr.update(job_id, {
+        "status":"done", 
+        "stage":"finished", 
+        "percent":100, 
+        "output": str(out_path), 
+        "message": "Video processing completed successfully!",
+        "stage_completed": True
+    })
 
 def process_video_parallel(job_id: str, input_path: str, output_path: str, 
                           status_mgr: StatusManager) -> Dict[str, Any]:

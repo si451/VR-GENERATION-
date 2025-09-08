@@ -176,9 +176,8 @@ export function UploadInterface() {
         const status = data.status
         const hasTransition = data.has_transition
         
-        // Only update UI if there's a stage transition or significant progress change
-        const progressChange = Math.abs((status.percent || 0) - lastProgress) >= 10
-        if (hasTransition || status.stage !== lastStage || progressChange) {
+        // Only update UI on stage transitions (start/end of stages)
+        if (hasTransition || status.stage !== lastStage) {
           lastStage = status.stage || "unknown"
           lastProgress = status.percent || 0
         
@@ -234,15 +233,15 @@ export function UploadInterface() {
           return
         }
         
-        // Determine next poll interval based on stage and progress
+        // Determine next poll interval based on stage transitions
         let nextPollInterval = 5000 // Default 5 seconds
         
         if (hasTransition || status.stage !== lastStage) {
           // Poll quickly on stage changes
           nextPollInterval = 2000
         } else if (status.status === "running") {
-          // Poll every 10 seconds during processing
-          nextPollInterval = 10000
+          // Poll every 15 seconds during processing (waiting for stage transitions)
+          nextPollInterval = 15000
         }
         
         // Schedule next poll

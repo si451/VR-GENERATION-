@@ -374,68 +374,11 @@ async def upload(file: UploadFile = File(...)):
                                 status_mgr.update(job_id, {"status":"running", "stage":"extract_frames", "percent":25, "message":"Frame extraction completed", "stage_completed": True})
                             elif "Total frames extracted:" in line:
                                 status_mgr.update(job_id, {"status":"running", "stage":"extract_frames", "percent":27, "message":"Frame extraction verified"})
-                            elif "Starting depth estimation" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":30, "message":"Starting depth estimation... (Estimated time: 15-20 minutes)", "stage_started": True})
-                            elif "Depth estimation:" in line and "%" in line:
-                                # Extract progress from tqdm output
-                                import re
-                                progress_match = re.search(r'(\d+)%', line)
-                                if progress_match:
-                                    progress = int(progress_match.group(1))
-                                    # Only update every 25% to reduce file locking issues
-                                    if progress % 25 == 0 or progress >= 95:
-                                        # Map 0-100% to 30-50% of total progress
-                                        total_progress = 30 + int(progress * 0.2)
-                                        status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":total_progress, "message":f"Estimating depth maps... {progress}%"})
-                            elif "Depth estimation completed" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"depth_estimation", "percent":50, "message":"Depth estimation completed", "stage_completed": True})
-                            elif "Starting temporal smoothing" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":55, "message":"Starting temporal smoothing... (Estimated time: 5-8 minutes)", "stage_started": True})
-                            elif "Temporal smoothing:" in line and "%" in line:
-                                # Extract progress from tqdm output
-                                import re
-                                progress_match = re.search(r'(\d+)%', line)
-                                if progress_match:
-                                    progress = int(progress_match.group(1))
-                                    # Only update every 25% to reduce file locking issues
-                                    if progress % 25 == 0 or progress >= 95:
-                                        # Map 0-100% to 55-65% of total progress
-                                        total_progress = 55 + int(progress * 0.1)
-                                        status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":total_progress, "message":f"Applying temporal smoothing... {progress}%"})
-                            elif "Temporal smoothing completed" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":65, "message":"Temporal smoothing completed", "stage_completed": True})
-                            elif "Starting LDI reprojection and inpainting" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":70, "message":"Starting VR180 view creation... (Estimated time: 8-12 minutes)", "stage_started": True})
-                            elif "LDI & Inpainting:" in line and "%" in line:
-                                # Extract progress from tqdm output
-                                import re
-                                progress_match = re.search(r'(\d+)%', line)
-                                if progress_match:
-                                    progress = int(progress_match.group(1))
-                                    # Only update every 25% to reduce file locking issues
-                                    if progress % 25 == 0 or progress >= 95:
-                                        # Map 0-100% to 70-85% of total progress
-                                        total_progress = 70 + int(progress * 0.15)
-                                        status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":total_progress, "message":f"Creating VR180 views... {progress}%"})
-                            elif "LDI reprojection and inpainting completed" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"ldi_reprojection", "percent":85, "message":"VR180 reprojection completed", "stage_completed": True})
-                            elif "Creating final VR180 video" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":90, "message":"Creating final VR180 video... (Estimated time: 2-3 minutes)", "stage_started": True})
-                            elif "Creating side-by-side video" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":92, "message":"Creating side-by-side video..."})
-                            elif "Encoding video with high quality settings..." in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":95, "message":"Encoding final video..."})
-                            elif "Side-by-side video created:" in line:
-                                status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":98, "message":"Video encoding completed"})
-                            elif "Output video created:" in line:
-                                # Extract output path from the line
-                                import re
-                                path_match = re.search(r'Output video created: ([^(]+)', line)
-                                if path_match:
-                                    output_path = path_match.group(1).strip()
-                                    status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":99, "message":"Final video created", "output": output_path})
-                                else:
-                                    status_mgr.update(job_id, {"status":"running", "stage":"encode", "percent":99, "message":"Final video created"})
+                            # Stage transitions are now handled directly in pipeline.py
+                            # All stage transitions are now handled directly in pipeline.py
+                            # All stage transitions are now handled directly in pipeline.py
+                            # All stage transitions are now handled directly in pipeline.py
+                            
                             elif "Job" in line and "completed successfully" in line:
                                 status_mgr.update(job_id, {"status":"done", "stage":"finished", "percent":100, "message":"Video processing completed successfully!", "stage_completed": True})
                             elif "Results saved in:" in line:
