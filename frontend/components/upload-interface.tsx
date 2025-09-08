@@ -176,8 +176,18 @@ export function UploadInterface() {
         const status = data.status
         const hasTransition = data.has_transition
         
+        console.log('Received status:', { status, hasTransition, data })
+        
         // Only update UI on stage transitions (start/end of stages)
         if (hasTransition || status.stage !== lastStage) {
+          console.log('Stage transition detected:', { 
+            hasTransition, 
+            oldStage: lastStage, 
+            newStage: status.stage, 
+            status: status.status,
+            message: status.message,
+            percent: status.percent 
+          })
           lastStage = status.stage || "unknown"
           lastProgress = status.percent || 0
         
