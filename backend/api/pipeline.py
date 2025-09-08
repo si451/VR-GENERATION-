@@ -189,12 +189,15 @@ def build_ldi_and_reproject(frame_rgb: np.ndarray, depth_norm: np.ndarray, basel
 async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True):
     job_dir = WORKSPACE_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
-    frames_dir = job_dir / "frames"
-    frames_down = job_dir / "frames_down"
-    left_dir = job_dir / "left"
-    right_dir = job_dir / "right"
-    preview_dir = job_dir / "preview"
-    for d in [frames_dir, frames_down, left_dir, right_dir, preview_dir]:
+    
+    # Create stage-specific directories for disk storage
+    frames_dir = job_dir / "01_frames"
+    depths_dir = job_dir / "02_depths"
+    smoothed_dir = job_dir / "03_smoothed"
+    left_dir = job_dir / "04_left"
+    right_dir = job_dir / "05_right"
+    
+    for d in [frames_dir, depths_dir, smoothed_dir, left_dir, right_dir]:
         d.mkdir(parents=True, exist_ok=True)
 
     status_mgr.update(job_id, {"status":"running", "stage":"probe_video", "percent":1})
@@ -222,20 +225,33 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     print(f"Using FPS: {fps:.3f} from {r_frame_rate}")
     print(f"Video duration: {duration:.2f}s")
     print(f"Expected total frames: {int(duration * fps)}")
-    # extract frames downscaled for inference
-    status_mgr.update(job_id, {"status":"running", "stage":"extract_frames", "percent":5})
+    # Stage 0: Extract frames - START
+    status_mgr.update(job_id, {
+        "status":"running", 
+        "stage":"extract_frames", 
+        "percent":5,
+        "message":"Starting frame extraction... (Estimated time: 2-3 minutes)",
+        "stage_started": True
+    })
     
-    def frame_progress_callback(current, total):
-        if total > 0:
-            progress = 5 + int(5 * current / total)  # 5-10% range
-            status_mgr.update(job_id, {"status":"running", "stage":"extract_frames", "percent":progress})
+    # Extract frames with tqdm progress
+    print(f"Extracting frames from video...")
+    with tqdm(desc="Extracting Frames", unit="frame") as pbar:
+        await extract_frames(input_path, frames_dir, downscale_width=DOWNSCALE_WIDTH, progress_callback=lambda c, t: pbar.update(1) if c > 0 else None)
     
-    await extract_frames(input_path, frames_down, downscale_width=DOWNSCALE_WIDTH, progress_callback=frame_progress_callback)
-    
-    # get list of frames
-    frame_files = sorted(frames_down.glob("frame_*.png"))
+    # Get list of extracted frames
+    frame_files = sorted(frames_dir.glob("frame_*.png"))
     n_frames = len(frame_files)
     print(f"Total frames extracted: {n_frames}")
+    
+    # Stage 0: Extract frames - END
+    status_mgr.update(job_id, {
+        "status":"running", 
+        "stage":"extract_frames", 
+        "percent":10,
+        "message":"Frame extraction completed. Starting depth estimation...",
+        "stage_completed": True
+    })
     # Stage 1: Depth Estimation - START
     status_mgr.update(job_id, {
         "status":"running", 
@@ -246,80 +262,42 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
         "stage_started": True
     })
     print(f"Starting depth estimation for {n_frames} frames...")
-    depths = []
     
-    # Process frames in smaller batches to avoid memory issues
-    batch_size = 4  # Very small batch size for memory efficiency
-    chunk_size = 10  # Very small chunk size for loading
-    
-    # Process frames in chunks to avoid loading all into memory at once
-    depths = []
-    import time
-    start_time = time.time()
-    max_processing_time = 1800  # 30 minutes max for depth estimation
-    
-    # Create tqdm progress bar for depth estimation
-    last_progress = 0
+    # Process frames one by one and save to disk
     with tqdm(total=n_frames, desc="Depth Estimation", unit="frame", 
               bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
         
-        for chunk_start in range(0, n_frames, chunk_size):
-            # Check for timeout
-            if time.time() - start_time > max_processing_time:
-                print(f"⚠️  Depth estimation timeout after {max_processing_time/60:.1f} minutes")
-                break
-            chunk_end = min(chunk_start + chunk_size, n_frames)
-            chunk_files = frame_files[chunk_start:chunk_end]
-            
-            # Load chunk of images
-            chunk_images = []
-            for fpath in chunk_files:
-                try:
-                    img = Image.open(fpath).convert("RGB")
-                    # Resize to target resolution if needed to save memory
-                    if img.size[0] > DOWNSCALE_WIDTH:
-                        img = img.resize((DOWNSCALE_WIDTH, int(img.size[1] * DOWNSCALE_WIDTH / img.size[0])), Image.Resampling.LANCZOS)
-                    chunk_images.append(np.array(img))
-                except Exception as e:
-                    print(f"Failed to load frame {fpath}: {e}")
-                    # Create dummy image
-                    dummy_img = np.ones((DOWNSCALE_WIDTH//2, DOWNSCALE_WIDTH//2, 3), dtype=np.uint8) * 128
-                    chunk_images.append(dummy_img)
-            
-            # Process this chunk
-            chunk_depths = []
-            for i, img_array in enumerate(chunk_images):
-                try:
-                    # Convert numpy array to PIL for depth estimation
-                    img_pil = Image.fromarray(img_array)
-                    
-                    # Use simpler depth estimation for reliability
-                    depth_arr = create_local_depth_map(img_pil)
-                    depth_arr = normalize_depth(depth_arr)
-                    chunk_depths.append(depth_arr)
-                    
-                    # Update progress bar
-                    pbar.update(1)
-                    
-                    # No intermediate progress updates - only stage start/end
+        for i, frame_path in enumerate(frame_files):
+            try:
+                # Load frame
+                img = Image.open(frame_path).convert("RGB")
+                if img.size[0] > DOWNSCALE_WIDTH:
+                    img = img.resize((DOWNSCALE_WIDTH, int(img.size[1] * DOWNSCALE_WIDTH / img.size[0])), Image.Resampling.LANCZOS)
+                
+                # Estimate depth
+                depth_arr = create_local_depth_map(img)
+                depth_arr = normalize_depth(depth_arr)
+                
+                # Save depth map to disk
+                depth_path = depths_dir / f"depth_{i:06d}.npy"
+                np.save(depth_path, depth_arr)
+                
+                # Update progress
+                pbar.update(1)
+                
+                # Clean up memory
+                del img, depth_arr
+                gc.collect()
                         
-                except (Exception, TimeoutError) as e:
-                    print(f"❌ Depth estimation failed for frame {chunk_start + i + 1}: {e}")
-                    # Create a dummy depth map as fallback
-                    dummy_depth = np.ones((img_array.shape[0], img_array.shape[1]), dtype=np.float32) * 0.5
-                    chunk_depths.append(dummy_depth)
-                    pbar.update(1)
-            
-            depths.extend(chunk_depths)
-            
-            # Force garbage collection after each chunk
-            del chunk_images, chunk_depths
-            gc.collect()
-            
-            # Add a small delay to prevent overwhelming the system
-            time.sleep(0.1)
+            except Exception as e:
+                print(f"❌ Depth estimation failed for frame {i}: {e}")
+                # Create dummy depth map
+                dummy_depth = np.ones((DOWNSCALE_WIDTH//2, DOWNSCALE_WIDTH//2), dtype=np.float32) * 0.5
+                depth_path = depths_dir / f"depth_{i:06d}.npy"
+                np.save(depth_path, dummy_depth)
+                pbar.update(1)
     
-    print(f"Depth estimation completed for {len(depths)} frames")
+    print(f"Depth estimation completed for {n_frames} frames")
     # Free memory after depth estimation
     gc.collect()
     
@@ -340,135 +318,49 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
         "message":"Starting temporal smoothing... (Estimated time: 5-8 minutes)",
         "stage_started": True
     })
-    # Memory-efficient temporal smoothing with on-the-fly flow computation
     print(f"Starting temporal smoothing...")
-    depths_smoothed = []
-    last_progress = 0
     
     with tqdm(total=n_frames, desc="Temporal Smoothing", unit="frame",
               bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
         for i in range(n_frames):
-            depth_cur = depths[i]
+            # Load current depth from disk
+            depth_path = depths_dir / f"depth_{i:06d}.npy"
+            depth_cur = np.load(depth_path)
+            
             prev_idx = max(i-1, 0)
             next_idx = min(i+1, n_frames-1)
             
-            # Load frames on-demand for flow computation
+            # Load neighbor depths from disk
+            depth_prev_path = depths_dir / f"depth_{prev_idx:06d}.npy"
+            depth_next_path = depths_dir / f"depth_{next_idx:06d}.npy"
+            depth_prev = np.load(depth_prev_path)
+            depth_next = np.load(depth_next_path)
+            
+            # Simple temporal smoothing (average with neighbors)
             try:
-                if i > 0:
-                    # Load current and previous frames
-                    img_cur = Image.open(frame_files[i]).convert("RGB")
-                    img_prev = Image.open(frame_files[prev_idx]).convert("RGB")
-                    if img_cur.size[0] > DOWNSCALE_WIDTH:
-                        img_cur = img_cur.resize((DOWNSCALE_WIDTH, int(img_cur.size[1] * DOWNSCALE_WIDTH / img_cur.size[0])), Image.Resampling.LANCZOS)
-                    if img_prev.size[0] > DOWNSCALE_WIDTH:
-                        img_prev = img_prev.resize((DOWNSCALE_WIDTH, int(img_prev.size[1] * DOWNSCALE_WIDTH / img_prev.size[0])), Image.Resampling.LANCZOS)
-                    
-                    frame_cur_bgr = cv2.cvtColor(np.array(img_cur), cv2.COLOR_RGB2BGR)
-                    frame_prev_bgr = cv2.cvtColor(np.array(img_prev), cv2.COLOR_RGB2BGR)
-                    flow_cur_to_prev = compute_flow_cv2(frame_cur_bgr, frame_prev_bgr)
-                else:
-                    h, w = depth_cur.shape[:2]
-                    flow_cur_to_prev = np.zeros((h, w, 2), dtype=np.float32)
+                # Ensure all depths have same shape
+                if depth_prev.shape != depth_cur.shape:
+                    depth_prev = cv2.resize(depth_prev, (depth_cur.shape[1], depth_cur.shape[0]))
+                if depth_next.shape != depth_cur.shape:
+                    depth_next = cv2.resize(depth_next, (depth_cur.shape[1], depth_cur.shape[0]))
                 
-                if i < n_frames-1:
-                    # Load next frame
-                    img_next = Image.open(frame_files[next_idx]).convert("RGB")
-                    if img_next.size[0] > DOWNSCALE_WIDTH:
-                        img_next = img_next.resize((DOWNSCALE_WIDTH, int(img_next.size[1] * DOWNSCALE_WIDTH / img_next.size[0])), Image.Resampling.LANCZOS)
-                    frame_next_bgr = cv2.cvtColor(np.array(img_next), cv2.COLOR_RGB2BGR)
-                    flow_cur_to_next = compute_flow_cv2(frame_cur_bgr, frame_next_bgr)
-                else:
-                    flow_cur_to_next = np.zeros_like(flow_cur_to_prev)
+                # Simple temporal fusion
+                fused = 0.6 * depth_cur + 0.2 * depth_prev + 0.2 * depth_next
+                smoothed_depth = normalize_depth(fused)
                 
             except Exception as e:
-                print(f"Flow computation failed for frame {i}: {e}")
-                h, w = depth_cur.shape[:2]
-                flow_cur_to_prev = np.zeros((h, w, 2), dtype=np.float32)
-                flow_cur_to_next = np.zeros_like(flow_cur_to_prev)
+                print(f"Temporal smoothing failed for frame {i}: {e}, using original depth")
+                smoothed_depth = depth_cur
             
-            # No intermediate progress updates - only stage start/end
-            
-            # Ensure flow dimensions match depth dimensions
-            if flow_cur_to_prev.shape[:2] != depth_cur.shape[:2]:
-                if len(flow_cur_to_prev.shape) == 3:
-                    flow_resized = np.zeros((depth_cur.shape[0], depth_cur.shape[1], flow_cur_to_prev.shape[2]), dtype=flow_cur_to_prev.dtype)
-                    for j in range(flow_cur_to_prev.shape[2]):
-                        flow_resized[:, :, j] = cv2.resize(flow_cur_to_prev[:, :, j], (depth_cur.shape[1], depth_cur.shape[0]))
-                    flow_cur_to_prev = flow_resized
-                else:
-                    flow_cur_to_prev = cv2.resize(flow_cur_to_prev, (depth_cur.shape[1], depth_cur.shape[0]))
-            
-            if flow_cur_to_next.shape[:2] != depth_cur.shape[:2]:
-                if len(flow_cur_to_next.shape) == 3:
-                    flow_resized = np.zeros((depth_cur.shape[0], depth_cur.shape[1], flow_cur_to_next.shape[2]), dtype=flow_cur_to_next.dtype)
-                    for j in range(flow_cur_to_next.shape[2]):
-                        flow_resized[:, :, j] = cv2.resize(flow_cur_to_next[:, :, j], (depth_cur.shape[1], depth_cur.shape[0]))
-                    flow_cur_to_next = flow_resized
-                else:
-                    flow_cur_to_next = cv2.resize(flow_cur_to_next, (depth_cur.shape[1], depth_cur.shape[0]))
-            
-            # Get neighbor depths
-            depth_prev = depths[prev_idx]
-            depth_next = depths[next_idx]
-            
-            # Ensure depth dimensions match
-            if depth_prev.shape != depth_cur.shape:
-                depth_prev = cv2.resize(depth_prev, (depth_cur.shape[1], depth_cur.shape[0]))
-            if depth_next.shape != depth_cur.shape:
-                depth_next = cv2.resize(depth_next, (depth_cur.shape[1], depth_cur.shape[0]))
-            
-            try:
-                # Ensure depth arrays are 2D for warping
-                if len(depth_prev.shape) == 3:
-                    depth_prev_2d = depth_prev[:,:,0] if depth_prev.shape[2] == 1 else depth_prev.mean(axis=2)
-                else:
-                    depth_prev_2d = depth_prev
-                    
-                if len(depth_next.shape) == 3:
-                    depth_next_2d = depth_next[:,:,0] if depth_next.shape[2] == 1 else depth_next.mean(axis=2)
-                else:
-                    depth_next_2d = depth_next
-                
-                # Vectorized warping operations
-                warped_prev = warp_image_with_flow((depth_prev_2d*255).astype(np.uint8), flow_cur_to_prev)
-                warped_prev = warped_prev.astype(np.float32)/255.0
-                warped_next = warp_image_with_flow((depth_next_2d*255).astype(np.uint8), flow_cur_to_next)
-                warped_next = warped_next.astype(np.float32)/255.0
-                
-                # Ensure warped arrays are 2D
-                if len(warped_prev.shape) == 3:
-                    warped_prev = warped_prev[:,:,0] if warped_prev.shape[2] == 1 else warped_prev.mean(axis=2)
-                if len(warped_next.shape) == 3:
-                    warped_next = warped_next[:,:,0] if warped_next.shape[2] == 1 else warped_next.mean(axis=2)
-                
-                # Vectorized temporal fusion
-                motion_magnitude = np.sqrt(np.sum(flow_cur_to_prev**2, axis=2) + np.sum(flow_cur_to_next**2, axis=2))
-                motion_factor = np.clip(motion_magnitude / 10.0, 0.1, 1.0)
-                
-                # Vectorized weight calculation
-                w_prev = 0.2 * motion_factor
-                w_next = 0.2 * motion_factor
-                w_cur = 1.0 - w_prev - w_next
-                
-                # Normalize weights
-                total_weight = w_cur + w_prev + w_next
-                w_cur = w_cur / total_weight
-                w_prev = w_prev / total_weight
-                w_next = w_next / total_weight
-                
-                # Vectorized fusion - ensure all arrays have same shape
-                fused = w_cur * depth_cur + w_prev * warped_prev + w_next * warped_next
-                
-            except Exception as e:
-                print(f"Warping failed for frame {i}: {e}, using original depth")
-                fused = depth_cur
-            
-            depths_smoothed.append(normalize_depth(fused))
+            # Save smoothed depth to disk
+            smoothed_path = smoothed_dir / f"smoothed_{i:06d}.npy"
+            np.save(smoothed_path, smoothed_depth)
             
             pbar.update(1)
-            if i % 32 == 0:  # Update less frequently
-                progress = 52 + int(10.0*i/n_frames)
-                status_mgr.update(job_id, {"status":"running", "stage":"temporal_smoothing", "percent":progress})
+            
+            # Clean up memory
+            del depth_cur, depth_prev, depth_next, smoothed_depth
+            gc.collect()
     
     print(f"Temporal smoothing completed")
     # Free memory after temporal smoothing
@@ -491,66 +383,64 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
         "message":"Starting VR180 view creation... (Estimated time: 8-12 minutes)",
         "stage_started": True
     })
-    # Enhanced batch LDI reprojection and inpainting
     print(f"Starting VR180 view creation...")
     
-    # Process frames in batches for better performance
-    ldi_batch_size = 4  # Reduced batch size for memory efficiency
-    last_progress = 0
     with tqdm(total=n_frames, desc="VR180 View Creation", unit="frame",
               bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
-        for batch_start in range(0, n_frames, ldi_batch_size):
-            batch_end = min(batch_start + ldi_batch_size, n_frames)
+        for i in range(n_frames):
+            # Load frame from disk
+            img = Image.open(frame_files[i]).convert("RGB")
+            if img.size[0] > DOWNSCALE_WIDTH:
+                img = img.resize((DOWNSCALE_WIDTH, int(img.size[1] * DOWNSCALE_WIDTH / img.size[0])), Image.Resampling.LANCZOS)
+            frame_rgb = np.array(img).astype(np.uint8)
             
-            # Process batch of frames
-            for i in range(batch_start, batch_end):
-                # Load frame on-demand
-                img = Image.open(frame_files[i]).convert("RGB")
-                if img.size[0] > DOWNSCALE_WIDTH:
-                    img = img.resize((DOWNSCALE_WIDTH, int(img.size[1] * DOWNSCALE_WIDTH / img.size[0])), Image.Resampling.LANCZOS)
-                frame_rgb = np.array(img).astype(np.uint8)
-                depth_norm = depths_smoothed[i]
-                
-                # Build LDI and reproject
-                left_img, right_img, left_hmask, right_hmask = build_ldi_and_reproject(frame_rgb, depth_norm, BASELINE_RATIO, LDI_LAYERS)
-                
-                # Convert to PIL for inpainting
-                left_mask_pil = Image.fromarray(left_hmask).convert("L")
-                right_mask_pil = Image.fromarray(right_hmask).convert("L")
-                left_pil = Image.fromarray(left_img)
-                right_pil = Image.fromarray(right_img)
-                
-                # Batch inpainting for left view
-                if left_hmask.sum() > 0:
-                    if use_inpaint_sd:
-                        try:
-                            left_inp = sd_inpaint(left_pil, left_mask_pil)
-                            left_inp.save(left_dir / f"frame_{i:06d}.png")
-                        except Exception as e:
-                            print(f"Inpainting failed for left frame {i}: {e}")
-                            left_pil.save(left_dir / f"frame_{i:06d}.png")
-                    else:
+            # Load smoothed depth from disk
+            smoothed_path = smoothed_dir / f"smoothed_{i:06d}.npy"
+            depth_norm = np.load(smoothed_path)
+            
+            # Build LDI and reproject
+            left_img, right_img, left_hmask, right_hmask = build_ldi_and_reproject(frame_rgb, depth_norm, BASELINE_RATIO, LDI_LAYERS)
+            
+            # Convert to PIL for inpainting
+            left_mask_pil = Image.fromarray(left_hmask).convert("L")
+            right_mask_pil = Image.fromarray(right_hmask).convert("L")
+            left_pil = Image.fromarray(left_img)
+            right_pil = Image.fromarray(right_img)
+            
+            # Inpainting for left view
+            if left_hmask.sum() > 0:
+                if use_inpaint_sd:
+                    try:
+                        left_inp = sd_inpaint(left_pil, left_mask_pil)
+                        left_inp.save(left_dir / f"frame_{i:06d}.png")
+                    except Exception as e:
+                        print(f"Inpainting failed for left frame {i}: {e}")
                         left_pil.save(left_dir / f"frame_{i:06d}.png")
                 else:
                     left_pil.save(left_dir / f"frame_{i:06d}.png")
+            else:
+                left_pil.save(left_dir / f"frame_{i:06d}.png")
 
-                # Batch inpainting for right view
-                if right_hmask.sum() > 0:
-                    if use_inpaint_sd:
-                        try:
-                            right_inp = sd_inpaint(right_pil, right_mask_pil)
-                            right_inp.save(right_dir / f"frame_{i:06d}.png")
-                        except Exception as e:
-                            print(f"Inpainting failed for right frame {i}: {e}")
-                            right_pil.save(right_dir / f"frame_{i:06d}.png")
-                    else:
+            # Inpainting for right view
+            if right_hmask.sum() > 0:
+                if use_inpaint_sd:
+                    try:
+                        right_inp = sd_inpaint(right_pil, right_mask_pil)
+                        right_inp.save(right_dir / f"frame_{i:06d}.png")
+                    except Exception as e:
+                        print(f"Inpainting failed for right frame {i}: {e}")
                         right_pil.save(right_dir / f"frame_{i:06d}.png")
                 else:
                     right_pil.save(right_dir / f"frame_{i:06d}.png")
+            else:
+                right_pil.save(right_dir / f"frame_{i:06d}.png")
 
-                pbar.update(1)
+            pbar.update(1)
             
-            # No intermediate progress updates - only stage start/end
+            # Clean up memory
+            del img, frame_rgb, depth_norm, left_img, right_img, left_hmask, right_hmask
+            del left_pil, right_pil, left_mask_pil, right_mask_pil
+            gc.collect()
     
     print(f"LDI reprojection and inpainting completed")
     
@@ -600,335 +490,6 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
         "stage_completed": True
     })
 
-def process_video_parallel(job_id: str, input_path: str, output_path: str, 
-                          status_mgr: StatusManager) -> Dict[str, Any]:
-    """Process video with parallel stages and memory streaming"""
-    try:
-        # Get video info
-        video_info = get_video_info(input_path)
-        n_frames = video_info['frame_count']
-        fps = video_info['fps']
-        duration = video_info['duration']
-        
-        print(f"🎬 Processing {n_frames} frames at {fps:.2f} FPS")
-        
-        # Create workspace
-        workspace = Path(WORKSPACE_DIR) / job_id
-        workspace.mkdir(parents=True, exist_ok=True)
-        
-        # Stage 1: Extract frames (streaming)
-        print("📸 Extracting frames...")
-        status_mgr.update(job_id, {"status": "running", "stage": "extract_frames", "percent": 5})
-        
-        frame_dir = workspace / "frames"
-        frame_dir.mkdir(exist_ok=True)
-        
-        # Extract frames with streaming
-        extract_frames_streaming(input_path, frame_dir, n_frames)
-        status_mgr.update(job_id, {"status": "running", "stage": "depth_estimation", "percent": 10})
-        
-        # Stage 2: Parallel depth estimation + temporal smoothing + LDI generation
-        print("🧠 Starting parallel processing...")
-        
-        # Create processing queues
-        frame_queue = queue.Queue(maxsize=50)  # Limit memory
-        depth_queue = queue.Queue(maxsize=50)
-        ldi_queue = queue.Queue(maxsize=50)
-        
-        # Start parallel workers using ThreadPoolExecutor (queues work with threads)
-        with ThreadPoolExecutor(max_workers=7) as executor:
-            # Submit parallel tasks with job_id and status_mgr for progress updates
-            depth_future = executor.submit(process_depth_parallel, frame_dir, n_frames, depth_queue, job_id, status_mgr)
-            temporal_future = executor.submit(process_temporal_parallel, depth_queue, n_frames, ldi_queue, job_id, status_mgr)
-            ldi_future = executor.submit(process_ldi_parallel, ldi_queue, n_frames, workspace, job_id, status_mgr)
-            
-            # Monitor progress
-            monitor_parallel_progress(job_id, status_mgr, depth_future, temporal_future, ldi_future)
-            
-            # Wait for completion
-            depth_future.result()
-            temporal_future.result()
-            ldi_future.result()
-        
-        # Stage 3: Final encoding
-        print("🎥 Final encoding...")
-        status_mgr.update(job_id, {"status": "running", "stage": "final_encoding", "percent": 90})
-        
-        # Encode final video
-        encode_final_video(workspace, output_path, fps)
-        
-        status_mgr.update(job_id, {"status": "completed", "percent": 100})
-        return {"status": "success", "output_path": output_path}
-        
-    except Exception as e:
-        print(f"❌ Parallel processing error: {e}")
-        status_mgr.update(job_id, {"status": "failed", "error": str(e)})
-        return {"status": "error", "error": str(e)}
+# Parallel processing functions removed - using sequential disk-based processing
 
-def extract_frames_streaming(input_path: str, frame_dir: Path, n_frames: int):
-    """Extract frames with streaming to save memory"""
-    # Use FFmpeg to extract frames with streaming
-    cmd = [
-        'ffmpeg', '-i', str(input_path),
-        '-vf', 'fps=30',  # Limit to 30 FPS for processing
-        '-q:v', '2',  # High quality
-        str(frame_dir / 'frame_%06d.jpg')
-    ]
-    
-    subprocess.run(cmd, check=True, capture_output=True)
-
-def process_depth_parallel(frame_dir: Path, n_frames: int, depth_queue: queue.Queue, job_id: str = None, status_mgr = None):
-    """Process depth estimation in parallel with memory streaming"""
-    print("🧠 Starting parallel depth estimation...")
-    
-    for i in range(n_frames):
-        try:
-            frame_path = frame_dir / f"frame_{i+1:06d}.jpg"
-            if not frame_path.exists():
-                continue
-                
-            # Load and process single frame
-            img = Image.open(frame_path).convert("RGB")
-            depth_map = create_local_depth_map(img)
-            
-            # Stream to queue instead of storing in memory
-            depth_queue.put((i, depth_map))
-            
-            # Clean up immediately
-            del img, depth_map
-            gc.collect()
-            
-            # Update progress every 50 frames
-            if (i + 1) % 50 == 0:
-                progress = 10 + int(40.0 * (i + 1) / n_frames)
-                print(f"✅ Processed {i + 1}/{n_frames} frames for depth")
-                if status_mgr and job_id:
-                    try:
-                        status_mgr.update(job_id, {
-                            "status": "running", 
-                            "stage": "depth_estimation", 
-                            "percent": progress,
-                            "message": f"Processing depth maps... {i + 1}/{n_frames} frames"
-                        })
-                    except Exception as e:
-                        print(f"❌ Status update error: {e}")
-                
-        except Exception as e:
-            print(f"❌ Depth processing error for frame {i}: {e}")
-            # Add dummy depth map
-            depth_queue.put((i, np.ones((512, 512), dtype=np.float32) * 0.5))
-    
-    # Signal completion
-    depth_queue.put(None)
-
-def process_temporal_parallel(depth_queue: queue.Queue, n_frames: int, ldi_queue: queue.Queue, job_id: str = None, status_mgr = None):
-    """Process temporal smoothing in parallel with memory streaming"""
-    print("⏱️ Starting parallel temporal smoothing...")
-    
-    # Collect depth maps for temporal smoothing
-    depth_maps = {}
-    processed = 0
-    
-    while processed < n_frames:
-        try:
-            item = depth_queue.get(timeout=30)
-            if item is None:
-                break
-                
-            frame_idx, depth_map = item
-            depth_maps[frame_idx] = depth_map
-            
-            # Process in small batches to avoid memory overflow
-            if len(depth_maps) >= 50 or processed == n_frames - 1:
-                # Apply temporal smoothing to batch
-                smoothed_depths = apply_temporal_smoothing_batch(depth_maps)
-                
-                # Stream to LDI queue
-                for frame_idx, smoothed_depth in smoothed_depths.items():
-                    ldi_queue.put((frame_idx, smoothed_depth))
-                
-                # Clean up
-                depth_maps.clear()
-                gc.collect()
-                
-            processed += 1
-            
-            # Update progress every 100 processed frames
-            if processed % 100 == 0:
-                progress = 50 + int(20.0 * processed / n_frames)
-                print(f"✅ Temporal smoothing: {processed}/{n_frames} frames")
-                if status_mgr and job_id:
-                    try:
-                        status_mgr.update(job_id, {
-                            "status": "running", 
-                            "stage": "temporal_smoothing", 
-                            "percent": progress,
-                            "message": f"Applying temporal smoothing... {processed}/{n_frames} frames"
-                        })
-                    except Exception as e:
-                        print(f"❌ Status update error: {e}")
-            
-        except queue.Empty:
-            print("⚠️ Timeout waiting for depth data")
-            break
-    
-    # Signal completion
-    ldi_queue.put(None)
-
-def process_ldi_parallel(ldi_queue: queue.Queue, n_frames: int, workspace: Path, job_id: str = None, status_mgr = None):
-    """Process LDI generation in parallel with memory streaming"""
-    print("🎭 Starting parallel LDI generation...")
-    
-    ldi_dir = workspace / "ldi"
-    ldi_dir.mkdir(exist_ok=True)
-    
-    processed = 0
-    while processed < n_frames:
-        try:
-            item = ldi_queue.get(timeout=30)
-            if item is None:
-                break
-                
-            frame_idx, depth_map = item
-            
-            # Generate LDI for single frame
-            ldi_data = generate_ldi_single_frame(depth_map, frame_idx)
-            
-            # Save to disk immediately
-            ldi_path = ldi_dir / f"ldi_{frame_idx:06d}.npz"
-            np.savez_compressed(ldi_path, **ldi_data)
-            
-            processed += 1
-            
-            # Update progress every 100 processed frames
-            if processed % 100 == 0:
-                progress = 70 + int(20.0 * processed / n_frames)
-                print(f"✅ Generated {processed}/{n_frames} LDI frames")
-                if status_mgr and job_id:
-                    try:
-                        status_mgr.update(job_id, {
-                            "status": "running", 
-                            "stage": "ldi_generation", 
-                            "percent": progress,
-                            "message": f"Creating VR180 views... {processed}/{n_frames} frames"
-                        })
-                    except Exception as e:
-                        print(f"❌ Status update error: {e}")
-                
-        except queue.Empty:
-            print("⚠️ Timeout waiting for LDI data")
-            break
-
-def monitor_parallel_progress(job_id: str, status_mgr: StatusManager, 
-                            depth_future, temporal_future, ldi_future):
-    """Monitor parallel processing progress"""
-    start_time = time.time()
-    max_time = 1800  # 30 minutes max
-    
-    while not all(f.done() for f in [depth_future, temporal_future, ldi_future]):
-        if time.time() - start_time > max_time:
-            print("⚠️ Parallel processing timeout")
-            break
-            
-        # Update progress based on completed stages
-        progress = 10
-        if depth_future.done():
-            progress += 30
-        if temporal_future.done():
-            progress += 30
-        if ldi_future.done():
-            progress += 20
-            
-        try:
-            status_mgr.update(job_id, {
-                "status": "running", 
-                "stage": "parallel_processing", 
-                "percent": progress
-            })
-        except:
-            pass
-            
-        time.sleep(5)  # Update every 5 seconds
-
-def apply_temporal_smoothing_batch(depth_maps: Dict[int, np.ndarray]) -> Dict[int, np.ndarray]:
-    """Apply temporal smoothing to a batch of depth maps"""
-    if not depth_maps:
-        return {}
-    
-    # Sort by frame index
-    sorted_frames = sorted(depth_maps.items())
-    smoothed = {}
-    
-    for i, (frame_idx, depth_map) in enumerate(sorted_frames):
-        # Simple temporal smoothing - average with neighbors
-        neighbors = []
-        
-        # Add previous frame
-        if i > 0:
-            prev_idx, prev_depth = sorted_frames[i-1]
-            neighbors.append(prev_depth)
-        
-        # Add current frame
-        neighbors.append(depth_map)
-        
-        # Add next frame
-        if i < len(sorted_frames) - 1:
-            next_idx, next_depth = sorted_frames[i+1]
-            neighbors.append(next_depth)
-        
-        # Average the neighbors
-        if len(neighbors) > 1:
-            smoothed_depth = np.mean(neighbors, axis=0)
-        else:
-            smoothed_depth = depth_map
-            
-        smoothed[frame_idx] = smoothed_depth
-    
-    return smoothed
-
-def generate_ldi_single_frame(depth_map: np.ndarray, frame_idx: int) -> Dict[str, np.ndarray]:
-    """Generate LDI data for a single frame"""
-    # Simple LDI generation - create stereo views
-    h, w = depth_map.shape
-    
-    # Create left and right views based on depth
-    left_view = np.zeros((h, w, 3), dtype=np.uint8)
-    right_view = np.zeros((h, w, 3), dtype=np.uint8)
-    
-    # Simple stereo generation (placeholder - you can enhance this)
-    for y in range(h):
-        for x in range(w):
-            depth = depth_map[y, x]
-            # Create stereo offset based on depth
-            offset = int(depth * 10)  # Adjust multiplier as needed
-            
-            # Left view
-            if x - offset >= 0:
-                left_view[y, x] = [255, 255, 255]  # White for now
-            
-            # Right view  
-            if x + offset < w:
-                right_view[y, x] = [255, 255, 255]  # White for now
-    
-    return {
-        'left_view': left_view,
-        'right_view': right_view,
-        'depth_map': depth_map
-    }
-
-def encode_final_video(workspace: Path, output_path: str, fps: float):
-    """Encode the final VR180 video"""
-    ldi_dir = workspace / "ldi"
-    
-    # Create video from LDI frames
-    cmd = [
-        'ffmpeg', '-y',
-        '-framerate', str(fps),
-        '-i', str(ldi_dir / 'ldi_%06d.npz'),
-        '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-crf', '23',
-        str(output_path)
-    ]
-    
-    subprocess.run(cmd, check=True)
+# All parallel processing functions removed - using sequential disk-based processing
