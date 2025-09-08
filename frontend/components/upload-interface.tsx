@@ -25,7 +25,11 @@ interface UploadedFile {
   stageMessage?: string
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://213.163.196.177:8000'
+
+// Debug: Log the API URL being used
+console.log('API_BASE_URL:', API_BASE_URL)
+console.log('NEXT_PUBLIC_API_URL env:', process.env.NEXT_PUBLIC_API_URL)
 
 export function UploadInterface() {
   const router = useRouter()
@@ -96,6 +100,7 @@ export function UploadInterface() {
         duration: 3000,
       })
 
+      console.log('Uploading to:', `${API_BASE_URL}/upload`)
       const response = await fetch(`${API_BASE_URL}/upload`, {
         method: 'POST',
         body: formData,
@@ -103,6 +108,8 @@ export function UploadInterface() {
           'Accept': 'application/json',
         },
       })
+      console.log('Upload response status:', response.status)
+      console.log('Upload response headers:', response.headers)
 
       if (!response.ok) {
         const errorData = await response.json()
