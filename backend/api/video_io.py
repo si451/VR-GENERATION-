@@ -152,9 +152,9 @@ async def extract_frames(video_path: Path, out_dir: Path, downscale_width: int =
             # Try with different parameters as fallback
             print("Trying fallback extraction...")
             try:
-                # Fallback with different quality settings
+                # Fallback with different quality settings (compatible with FFmpeg 4.4.2)
                 cmd_fallback = (f'{FFMPEG_BIN} -y -i "{video_path}" '
-                              f'-fps_mode vfr '
+                              f'-vsync 0 '  # Extract all frames, not just keyframes
                               f'-q:v 1 '  # Still high quality
                               f'-vf "format=rgb24{scale_filter}" '
                               f'-f image2 '

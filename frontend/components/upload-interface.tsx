@@ -243,14 +243,14 @@ export function UploadInterface() {
         }
         
         // Determine next poll interval based on stage transitions
-        let nextPollInterval = 5000 // Default 5 seconds
+        let nextPollInterval = 10000 // Default 10 seconds (reduced from 5)
         
         if (hasTransition || status.stage !== lastStage) {
           // Poll quickly on stage changes
-          nextPollInterval = 2000
+          nextPollInterval = 3000 // Reduced from 2 seconds
         } else if (status.status === "running") {
-          // Poll every 15 seconds during processing (waiting for stage transitions)
-          nextPollInterval = 15000
+          // Poll every 30 seconds during processing (waiting for stage transitions)
+          nextPollInterval = 30000 // Increased from 15 seconds
         }
         
         // Schedule next poll

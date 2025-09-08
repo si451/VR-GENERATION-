@@ -13,7 +13,7 @@ from pathlib import Path
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
-from api.pipeline import process_job, process_video_parallel
+from api.pipeline import process_job
 from api.config import WORKSPACE_DIR
 
 def main():
@@ -54,10 +54,11 @@ def main():
         # Create output path
         output_path = job_dir / f"{job_id}_sbs.mp4"
         
-        # Run the parallel processing job
-        result = process_video_parallel(job_id, str(input_path), str(output_path), status_mgr)
+        # Run the processing job
+        asyncio.run(process_job(job_id, input_path))
         
-        if result["status"] == "success":
+        # Check if output was created successfully
+        if output_path.exists():
             print(f"Job {job_id} completed successfully")
             print(f"Results saved in: {job_dir}")
             
@@ -69,7 +70,7 @@ def main():
                     size_mb = file.stat().st_size / (1024 * 1024)
                     print(f"  - {file.name} ({size_mb:.1f} MB)")
         else:
-            print(f"Job {job_id} failed: {result.get('error', 'Unknown error')}")
+            print(f"Job {job_id} failed: Output file not created")
             sys.exit(1)
                 
     except Exception as e:
