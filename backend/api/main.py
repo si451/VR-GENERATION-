@@ -285,14 +285,24 @@ def save_upload_stream(upload: UploadFile, target: Path, size_limit: int = MAX_U
 
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
-    job_id = uuid.uuid4().hex
-    job_dir = WORKSPACE_DIR / job_id
-    job_dir.mkdir(parents=True, exist_ok=True)
-    input_path = job_dir / "input.mp4"
-    loop = asyncio.get_running_loop()
-    
-    # stream save
-    await loop.run_in_executor(None, save_upload_stream, file, input_path)
+    try:
+        job_id = uuid.uuid4().hex
+        job_dir = WORKSPACE_DIR / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        input_path = job_dir / "input.mp4"
+        loop = asyncio.get_running_loop()
+        
+        print(f"📁 Upload received: {file.filename}, size: {file.size}")
+        print(f"📁 Job ID: {job_id}")
+        print(f"📁 Target path: {input_path}")
+        
+        # stream save
+        await loop.run_in_executor(None, save_upload_stream, file, input_path)
+        
+        print(f"✅ File saved successfully to: {input_path}")
+    except Exception as e:
+        print(f"❌ Upload error: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
     
     # quick probe and limit
     try:
@@ -317,8 +327,8 @@ async def upload(file: UploadFile = File(...)):
             # Try multiple possible paths for worker.py
             worker_paths = [
                 "worker.py",     # Same directory (Railway runs from backend/)
-                
-                
+                str(ROOT.parent / "worker.py"),  # Parent directory
+                "/app/worker.py",  # Docker container path
             ]
             
             print(f"Searching for worker.py in the following paths:")
@@ -339,6 +349,8 @@ async def upload(file: UploadFile = File(...)):
                 print(f"Directory contents: {os.listdir('.')}")
                 status_mgr.update(job_id, {"status":"failed", "message":"Worker script not found"})
                 return
+            
+            print(f"🚀 Starting worker with command: {' '.join(worker_cmd)}")
             
             process = subprocess.Popen(worker_cmd, 
                                     stdout=subprocess.PIPE, 
