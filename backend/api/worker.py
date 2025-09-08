@@ -13,7 +13,7 @@ from pathlib import Path
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
-from pipeline import process_job, process_video_parallel
+from pipeline import process_job
 from config import WORKSPACE_DIR
 
 def main():
@@ -54,23 +54,19 @@ def main():
         # Create output path
         output_path = job_dir / f"{job_id}_sbs.mp4"
         
-        # Run the parallel processing job
-        result = process_video_parallel(job_id, str(input_path), str(output_path), status_mgr)
+        # Run the sequential processing job
+        asyncio.run(process_job(job_id, input_path, use_inpaint_sd=True))
         
-        if result["status"] == "success":
-            print(f"Job {job_id} completed successfully")
-            print(f"Results saved in: {job_dir}")
-            
-            # List output files
-            output_files = list(job_dir.glob("*"))
-            print(f"Generated files:")
-            for file in output_files:
-                if file.is_file():
-                    size_mb = file.stat().st_size / (1024 * 1024)
-                    print(f"  - {file.name} ({size_mb:.1f} MB)")
-        else:
-            print(f"Job {job_id} failed: {result.get('error', 'Unknown error')}")
-            sys.exit(1)
+        print(f"Job {job_id} completed successfully")
+        print(f"Results saved in: {job_dir}")
+        
+        # List output files
+        output_files = list(job_dir.glob("*"))
+        print(f"Generated files:")
+        for file in output_files:
+            if file.is_file():
+                size_mb = file.stat().st_size / (1024 * 1024)
+                print(f"  - {file.name} ({size_mb:.1f} MB)")
                 
     except Exception as e:
         print(f"Job {job_id} failed: {e}")
