@@ -311,8 +311,10 @@ async def upload(file: UploadFile = File(...)):
         if duration > float(os.getenv("MAX_DURATION_SEC", "300")):  # 5 minutes limit
             status_mgr.update(job_id, {"status":"failed", "message":"video too long"})
             return {"job_id": job_id, "status": "rejected", "message": "duration exceeds limit"}
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"❌ Video probe failed: {e}")
+        status_mgr.update(job_id, {"status":"failed", "message":f"Invalid video file: {str(e)}"})
+        return {"job_id": job_id, "status": "rejected", "message": "Invalid video file format"}
     
     status_mgr.update(job_id, {"status":"queued", "stage":"queued"})
     
