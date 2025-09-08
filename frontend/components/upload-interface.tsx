@@ -189,7 +189,8 @@ export function UploadInterface() {
 
                 if (status.status === "done") {
                   newStatus = "completed"
-                  clearInterval(pollInterval)
+                  isPolling = false
+                  if (timeoutId) clearTimeout(timeoutId)
                   intervalsRef.current.delete(fileId)
                   // Show completion notification
                   toast({
@@ -199,7 +200,8 @@ export function UploadInterface() {
                   })
                 } else if (status.status === "failed") {
                   newStatus = "error"
-                  clearInterval(pollInterval)
+                  isPolling = false
+                  if (timeoutId) clearTimeout(timeoutId)
                   intervalsRef.current.delete(fileId)
                   // Show error notification
                   toast({
