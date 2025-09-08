@@ -55,7 +55,7 @@ def main():
         output_path = job_dir / f"{job_id}_sbs.mp4"
         
         # Run the sequential processing job
-        asyncio.run(process_job(job_id, input_path, use_inpaint_sd=True))
+        asyncio.run(process_job(job_id, input_path))
         
         print(f"Job {job_id} completed successfully")
         print(f"Results saved in: {job_dir}")
