@@ -367,8 +367,8 @@ async def create_side_by_side(left_dir: Path, right_dir: Path, out_path: Path, f
                    f'-i "{original_video_path}" '
                    f'-filter_complex "[0][1]hstack=inputs=2:shortest=1[v]" '
                    f'-map "[v]" -map 2:a '
-                   f'-c:v libx264 -crf 12 -preset slow '
-                   f'-c:a aac -b:a 192k -ar 48000 '
+                   f'-c:v libx264 -crf 18 -preset fast '  # Faster encoding for Railway
+                   f'-c:a aac -b:a 128k -ar 44100 '  # Lower audio bitrate
                    f'-pix_fmt yuv420p '
                    f'-shortest '
                    f'-avoid_negative_ts make_zero '
@@ -387,8 +387,8 @@ async def create_side_by_side(left_dir: Path, right_dir: Path, out_path: Path, f
                    f'-i "{original_video_path}" '
                    f'-filter_complex "[0][1]hstack=inputs=2:shortest=1[v]" '
                    f'-map "[v]" -map 2:a? '  # The ? makes audio optional
-                   f'-c:v libx264 -crf 12 -preset slow '
-                   f'-c:a aac -b:a 192k -ar 48000 '
+                   f'-c:v libx264 -crf 18 -preset fast '  # Faster encoding for Railway
+                   f'-c:a aac -b:a 128k -ar 44100 '  # Lower audio bitrate
                    f'-pix_fmt yuv420p '
                    f'-shortest '
                    f'-avoid_negative_ts make_zero '
@@ -436,7 +436,7 @@ async def create_side_by_side(left_dir: Path, right_dir: Path, out_path: Path, f
     try:
         version_cmd = f"{FFMPEG_BIN} -version"
         print(f"Testing FFmpeg version: {version_cmd}")
-        version_result = await run_cmd(version_cmd)
+        version_result = await run_cmd(version_cmd, timeout=30)  # Shorter timeout
         print(f"FFmpeg version output: {version_result[0][:200]}...")
     except Exception as e:
         print(f"FFmpeg version check failed: {e}")
@@ -445,7 +445,7 @@ async def create_side_by_side(left_dir: Path, right_dir: Path, out_path: Path, f
     try:
         filters_cmd = f"{FFMPEG_BIN} -filters"
         print(f"Checking available filters: {filters_cmd}")
-        filters_result = await run_cmd(filters_cmd)
+        filters_result = await run_cmd(filters_cmd, timeout=30)  # Shorter timeout
         if "hstack" in filters_result[0]:
             print("✅ hstack filter is available")
         else:
@@ -458,17 +458,25 @@ async def create_side_by_side(left_dir: Path, right_dir: Path, out_path: Path, f
     try:
         test_cmd = f'{FFMPEG_BIN} -f lavfi -i testsrc=duration=1:size=320x240:rate=1 -t 1 "{out_path.parent}/test_output.mp4"'
         print(f"Testing simple FFmpeg command: {test_cmd}")
-        await run_cmd(test_cmd)
+        await run_cmd(test_cmd, timeout=60)  # Shorter timeout
         print("Simple FFmpeg test passed")
     except Exception as e:
         print(f"Simple FFmpeg test failed: {e}")
     
-    # Now try the actual command
+    # Now try the actual command with shorter timeout for Railway
+    print(f"Starting main FFmpeg command with 300 second timeout...")
+    print(f"Command: {cmd}")
     try:
-        await run_cmd(cmd)
+        # Add progress indicator
+        import asyncio
+        print("🔄 FFmpeg is running... This may take a few minutes on Railway...")
+        
+        # Run with progress updates
+        result = await run_cmd(cmd, timeout=300)  # 5 minutes timeout for Railway
+        print("✅ Main FFmpeg command completed successfully!")
+        print(f"FFmpeg output: {result[0][:200]}...")
     except Exception as e:
-        print(f"Main FFmpeg command failed: {e}")
-        # Try alternative approach
+        print(f"❌ Main FFmpeg command failed: {e}")
         print("Trying alternative FFmpeg approach...")
         await try_alternative_ffmpeg_command(left_dir, right_dir, out_path, fps, original_video_path)
     
@@ -510,8 +518,8 @@ async def try_alternative_ffmpeg_command(left_dir: Path, right_dir: Path, out_pa
                    f'-i "{original_video_path}" '
                    f'-filter_complex "[0][1]hstack[v]" '
                    f'-map "[v]" -map 2:a? '
-                   f'-c:v libx264 -crf 18 -preset fast '
-                   f'-c:a aac -b:a 128k '
+                   f'-c:v libx264 -crf 20 -preset ultrafast '  # Even faster for Railway
+                   f'-c:a aac -b:a 96k '  # Lower bitrate
                    f'-pix_fmt yuv420p '
                    f'-shortest '
                    f'"{out_path}"')
