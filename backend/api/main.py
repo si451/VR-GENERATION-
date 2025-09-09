@@ -577,13 +577,37 @@ async def ws_job(websocket: WebSocket, job_id: str):
     await websocket.accept()
     conns = connections.setdefault(job_id, set())
     conns.add(websocket)
+    
+    print(f"WebSocket connected for job {job_id}")
+    
     try:
         while True:
-            await asyncio.sleep(5.0)  # Reduced from 1 second to 5 seconds
-            # push status file periodically
-            status = status_mgr.read(job_id)
-            await websocket.send_json(status)
+            await asyncio.sleep(2.0)  # Check every 2 seconds
+            try:
+                # Read status and send to client
+                status = status_mgr.read(job_id)
+                await websocket.send_json(status)
+                
+                # If job is done or failed, break the loop
+                if status.get('status') in ['done', 'failed']:
+                    print(f"Job {job_id} finished with status: {status.get('status')}")
+                    break
+                    
+            except Exception as e:
+                print(f"Error reading status for job {job_id}: {e}")
+                await websocket.send_json({
+                    "status": "error",
+                    "message": f"Error reading status: {str(e)}"
+                })
+                break
+                
     except WebSocketDisconnect:
+        print(f"WebSocket disconnected for job {job_id}")
+    except Exception as e:
+        print(f"WebSocket error for job {job_id}: {e}")
+    finally:
         conns.discard(websocket)
+        if not conns:  # If no more connections for this job
+            del connections[job_id]
 
 # Server startup is handled by start.sh script

@@ -365,7 +365,7 @@ async def create_side_by_side(left_dir: Path, right_dir: Path, out_path: Path, f
                    f'-framerate {fps} -i "{left_dir}/frame_%06d.png" '
                    f'-framerate {fps} -i "{right_dir}/frame_%06d.png" '
                    f'-i "{original_video_path}" '
-                   f'-filter_complex "[0][1]hstack=inputs=2[v]" '
+                   f'-filter_complex "[0][1]hstack=inputs=2:shortest=1[v]" '
                    f'-map "[v]" -map 2:a '
                    f'-c:v libx264 -crf 12 -preset slow '
                    f'-c:a aac -b:a 192k -ar 48000 '
@@ -385,7 +385,7 @@ async def create_side_by_side(left_dir: Path, right_dir: Path, out_path: Path, f
                    f'-framerate {fps} -i "{left_dir}/frame_%06d.png" '
                    f'-framerate {fps} -i "{right_dir}/frame_%06d.png" '
                    f'-i "{original_video_path}" '
-                   f'-filter_complex "[0][1]hstack=inputs=2[v]" '
+                   f'-filter_complex "[0][1]hstack=inputs=2:shortest=1[v]" '
                    f'-map "[v]" -map 2:a? '  # The ? makes audio optional
                    f'-c:v libx264 -crf 12 -preset slow '
                    f'-c:a aac -b:a 192k -ar 48000 '
@@ -403,7 +403,7 @@ async def create_side_by_side(left_dir: Path, right_dir: Path, out_path: Path, f
         cmd = (f'{FFMPEG_BIN} -y '
                f'-framerate {fps} -i "{left_dir}/frame_%06d.png" '
                f'-framerate {fps} -i "{right_dir}/frame_%06d.png" '
-               f'-filter_complex "[0][1]hstack=inputs=2" '
+               f'-filter_complex "[0][1]hstack=inputs=2:shortest=1" '
                f'-c:v libx264 -crf 12 -preset slow '  # Even higher quality settings
                f'-pix_fmt yuv420p '
                f'-avoid_negative_ts make_zero '  # Fix timestamp issues
@@ -415,6 +415,22 @@ async def create_side_by_side(left_dir: Path, right_dir: Path, out_path: Path, f
                f'"{out_path}"')
     
     print(f"Encoding video with high quality settings...")
+    print(f"Command: {cmd}")
+    
+    # Check if frame directories exist and have files
+    left_frames = list(left_dir.glob("frame_*.png"))
+    right_frames = list(right_dir.glob("frame_*.png"))
+    print(f"Left frames found: {len(left_frames)}")
+    print(f"Right frames found: {len(right_frames)}")
+    
+    if not left_frames or not right_frames:
+        raise RuntimeError(f"No frame files found. Left: {len(left_frames)}, Right: {len(right_frames)}")
+    
+    # Check if original video exists
+    if not original_video_path.exists():
+        raise RuntimeError(f"Original video not found: {original_video_path}")
+    
+    print(f"All inputs verified, running FFmpeg...")
     await run_cmd(cmd)
     
     # Verify output video duration
