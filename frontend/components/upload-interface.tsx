@@ -25,7 +25,7 @@ interface UploadedFile {
   stageMessage?: string
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://213.163.196.177:8000'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://213.163.196.177'
 
 // Debug: Log the API URL being used
 console.log('API_BASE_URL:', API_BASE_URL)
@@ -161,40 +161,128 @@ export function UploadInterface() {
   }
 
   const pollJobStatus = useCallback((jobId: string, fileId: string) => {
-    let lastStage = "queued"
-    let lastProgress = 0
-    let pollCount = 0
-    let timeoutId: ReturnType<typeof setTimeout>
-    let isPolling = true
+    let websocket: WebSocket | null = null
+    let isConnected = false
+    let reconnectAttempts = 0
+    const maxReconnectAttempts = 5
     
-    const poll = async () => {
-      if (!isPolling) return
-      
+    const connectWebSocket = () => {
       try {
-        pollCount++
+        // Use WebSocket for real-time updates
+        const wsUrl = API_BASE_URL.replace('https://', 'wss://').replace('http://', 'ws://')
+        websocket = new WebSocket(`${wsUrl}/ws/${jobId}`)
         
-        // Use stage transition endpoint for smart polling
-        const response = await fetch(`${API_BASE_URL}/status/${jobId}/stage-transitions`, {
-          headers: {
-            'Accept': 'application/json',
-          },
-        })
-        
-        if (!response.ok) {
-          const errorText = await response.text()
-          console.error(`Status fetch failed: ${response.status} - ${errorText}`)
-          throw new Error(`Failed to fetch status: ${response.status}`)
+        websocket.onopen = () => {
+          console.log(`WebSocket connected for job ${jobId}`)
+          isConnected = true
+          reconnectAttempts = 0
         }
+        
+        websocket.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data)
+            const status = data
+            
+            console.log('WebSocket status update:', status)
+            
+            setFiles((prev) =>
+              prev.map((f) => {
+                if (f.id === fileId) {
+                  const progress = status.percent || 0
+                  let newStatus: UploadedFile["status"] = "processing"
 
-        const data = await response.json()
-        const status = data.status
-        const hasTransition = data.has_transition
+                  if (status.status === "done") {
+                    newStatus = "completed"
+                    websocket?.close()
+                    intervalsRef.current.delete(fileId)
+                    // Show completion notification
+                    toast({
+                      title: "Processing Complete!",
+                      description: `${f.name} has been successfully converted to VR180 format.`,
+                      duration: 5000,
+                    })
+                  } else if (status.status === "failed") {
+                    newStatus = "error"
+                    websocket?.close()
+                    intervalsRef.current.delete(fileId)
+                    // Show error notification
+                    toast({
+                      title: "Processing Failed",
+                      description: `Failed to process ${f.name}: ${status.message || 'Unknown error'}`,
+                      variant: "destructive",
+                      duration: 5000,
+                    })
+                  }
+
+                  return {
+                    ...f,
+                    progress,
+                    status: newStatus,
+                    vrUrl: status.output ? `${API_BASE_URL}/download/${jobId}` : undefined,
+                    errorMessage: status.message || status.error_message,
+                    currentStage: status.stage || status.current_stage,
+                    stageMessage: status.message || status.stage_message,
+                  }
+                }
+                return f
+              })
+            )
+          } catch (error) {
+            console.error('Error parsing WebSocket message:', error)
+          }
+        }
         
-        // Only update UI on stage transitions (start/end of stages)
-        if (hasTransition || status.stage !== lastStage) {
-          lastStage = status.stage || "unknown"
-          lastProgress = status.percent || 0
+        websocket.onclose = () => {
+          console.log(`WebSocket closed for job ${jobId}`)
+          isConnected = false
+          
+          // Try to reconnect if not completed/failed
+          if (reconnectAttempts < maxReconnectAttempts) {
+            reconnectAttempts++
+            console.log(`Attempting to reconnect WebSocket (${reconnectAttempts}/${maxReconnectAttempts})`)
+            setTimeout(connectWebSocket, 2000 * reconnectAttempts)
+          } else {
+            console.error('Max reconnection attempts reached, falling back to polling')
+            startPolling()
+          }
+        }
         
+        websocket.onerror = (error) => {
+          console.error('WebSocket error:', error)
+          isConnected = false
+        }
+        
+      } catch (error) {
+        console.error('WebSocket connection error:', error)
+        startPolling()
+      }
+    }
+    
+    // Fallback polling method
+    const startPolling = () => {
+      let lastStage = "queued"
+      let pollCount = 0
+      let timeoutId: ReturnType<typeof setTimeout>
+      let isPolling = true
+      
+      const poll = async () => {
+        if (!isPolling) return
+        
+        try {
+          pollCount++
+          
+          const response = await fetch(`${API_BASE_URL}/status/${jobId}`, {
+            headers: {
+              'Accept': 'application/json',
+            },
+          })
+          
+          if (!response.ok) {
+            throw new Error(`Failed to fetch status: ${response.status}`)
+          }
+
+          const status = await response.json()
+          
           setFiles((prev) =>
             prev.map((f) => {
               if (f.id === fileId) {
@@ -206,7 +294,6 @@ export function UploadInterface() {
                   isPolling = false
                   if (timeoutId) clearTimeout(timeoutId)
                   intervalsRef.current.delete(fileId)
-                  // Show completion notification
                   toast({
                     title: "Processing Complete!",
                     description: `${f.name} has been successfully converted to VR180 format.`,
@@ -217,7 +304,6 @@ export function UploadInterface() {
                   isPolling = false
                   if (timeoutId) clearTimeout(timeoutId)
                   intervalsRef.current.delete(fileId)
-                  // Show error notification
                   toast({
                     title: "Processing Failed",
                     description: `Failed to process ${f.name}: ${status.message || 'Unknown error'}`,
@@ -239,57 +325,49 @@ export function UploadInterface() {
               return f
             })
           )
-        }
-        
-        // Stop polling if job is done or failed
-        if (status.status === "done" || status.status === "failed") {
+          
+          // Stop polling if job is done or failed
+          if (status.status === "done" || status.status === "failed") {
+            isPolling = false
+            if (timeoutId) clearTimeout(timeoutId)
+            intervalsRef.current.delete(fileId)
+            return
+          }
+          
+          // Poll every 5 seconds
+          if (isPolling) {
+            timeoutId = setTimeout(poll, 5000)
+          }
+          
+        } catch (error) {
+          console.error('Status polling error:', error)
           isPolling = false
           if (timeoutId) clearTimeout(timeoutId)
-          intervalsRef.current.delete(fileId)
-          return
-        }
-        
-        // Determine next poll interval based on stage transitions
-        let nextPollInterval = 10000 // Default 10 seconds (reduced from 5)
-        
-        if (hasTransition || status.stage !== lastStage) {
-          // Poll quickly on stage changes
-          nextPollInterval = 3000 // Reduced from 2 seconds
-        } else if (status.status === "running") {
-          // Poll every 30 seconds during processing (waiting for stage transitions)
-          nextPollInterval = 30000 // Increased from 15 seconds
-        }
-        
-        // Schedule next poll
-        if (isPolling) {
-          timeoutId = setTimeout(poll, nextPollInterval)
-        }
-        
-      } catch (error) {
-        console.error('Status polling error:', error)
-        isPolling = false
-        if (timeoutId) clearTimeout(timeoutId)
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === fileId 
-              ? { 
-                  ...f, 
-                  status: "error",
-                  errorMessage: `Failed to check processing status: ${error instanceof Error ? error.message : 'Unknown error'}`
-                } 
-              : f
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.id === fileId 
+                ? { 
+                    ...f, 
+                    status: "error",
+                    errorMessage: `Failed to check processing status: ${error instanceof Error ? error.message : 'Unknown error'}`
+                  } 
+                : f
+            )
           )
-        )
+        }
       }
+      
+      poll()
     }
     
-    // Start polling
-    poll()
+    // Try WebSocket first, fallback to polling
+    connectWebSocket()
     
     // Return cleanup function
     return () => {
-      isPolling = false
-      if (timeoutId) clearTimeout(timeoutId)
+      if (websocket) {
+        websocket.close()
+      }
     }
   }, [])
 
@@ -374,55 +452,49 @@ export function UploadInterface() {
 
   const getStageDisplayName = (stage: string): string => {
     const stageMap: { [key: string]: string } = {
-      'queued': 'Queued',
-      'starting': 'Starting',
-      'probe_video': 'Analyzing',
+      'starting': 'Starting Processing',
+      'probe_video': 'Analyzing Video',
       'extract_frames': 'Extracting Frames',
       'depth_estimation': 'Processing Depth',
-      'temporal_smoothing': 'Smoothing',
-      'ldi_reprojection': 'Creating VR180',
-      'encode': 'Finalizing',
-      'finished': 'Completed'
+      'temporal_smoothing': 'Smoothing Motion',
+      'ldi_reprojection': 'Creating VR180 Views',
+      'encode': 'Finalizing Video',
+      'finished': 'Completed',
+      'frame_extraction': 'Extracting Frames',
+      'ldi_creation': 'Creating VR180 Views',
+      'inpainting': 'Processing Views',
+      'interpolation': 'Finalizing',
+      'encoding': 'Finalizing Video',
+      'finalizing': 'Completing'
     }
-    return stageMap[stage] || 'Processing'
+    return stageMap[stage] || 'Processing Video'
   }
 
   const getStageProgress = (stage: string, percent: number): number => {
-    // Map stages to their progress ranges for better visual feedback
-    const stageRanges: { [key: string]: { min: number; max: number } } = {
-      'queued': { min: 0, max: 5 },
-      'starting': { min: 5, max: 10 },
-      'probe_video': { min: 10, max: 15 },
-      'extract_frames': { min: 15, max: 30 },
-      'depth_estimation': { min: 30, max: 55 },
-      'temporal_smoothing': { min: 55, max: 70 },
-      'ldi_reprojection': { min: 70, max: 90 },
-      'encode': { min: 90, max: 100 },
-      'finished': { min: 100, max: 100 }
-    }
-    
-    const range = stageRanges[stage] || { min: 0, max: 100 }
-    const stageProgress = Math.max(0, Math.min(100, percent))
-    
-    // Interpolate within the stage range
-    return range.min + (stageProgress / 100) * (range.max - range.min)
+    // Use the actual percent from backend, not fake stage ranges
+    return Math.max(0, Math.min(100, percent || 0))
   }
 
   const getDetailedStatus = (file: UploadedFile) => {
     if (file.status === "processing") {
       const stage = file.currentStage || "processing"
       
+      // Use stage message from backend if available, otherwise use stage-based messages
+      if (file.stageMessage) {
+        return file.stageMessage
+      }
+      
       // Simple stage descriptions without technical details
       const stageMap: { [key: string]: string } = {
         "starting": "🚀 Starting video processing...",
-        "probe_video": "📊 Analyzing video...",
-        "extract_frames": "🎬 Extracting frames...",
-        "depth_estimation": "🧠 Processing depth...",
+        "probe_video": "📊 Analyzing video properties...",
+        "extract_frames": "🎬 Extracting video frames...",
+        "depth_estimation": "🧠 Processing depth information...",
         "temporal_smoothing": "🔄 Smoothing motion...",
         "ldi_reprojection": "🎭 Creating VR180 views...",
         "encode": "🎬 Finalizing video...",
         "finished": "✅ Processing completed!",
-        "frame_extraction": "🎬 Extracting frames...",
+        "frame_extraction": "🎬 Extracting video frames...",
         "ldi_creation": "🎭 Creating VR180 views...",
         "inpainting": "🎨 Processing views...",
         "interpolation": "⚡ Finalizing...",
@@ -601,7 +673,7 @@ export function UploadInterface() {
                         <div className="w-3 h-3 bg-primary rounded-full animate-pulse"></div>
                         <p className="text-base text-primary font-semibold">{getDetailedStatus(file)}</p>
                       </div>
-                      {file.currentStage && (
+                      {file.currentStage && file.currentStage !== 'queued' && (
                         <div className="mt-2 text-sm text-primary/80 font-medium">
                           Stage: {getStageDisplayName(file.currentStage)}
                         </div>
@@ -609,16 +681,16 @@ export function UploadInterface() {
                       <div className="mt-3">
                         <div className="flex justify-between text-xs text-primary/60 mb-1">
                           <span>Progress</span>
-                          <span>{Math.round(getStageProgress(file.currentStage || 'queued', file.progress || 0))}%</span>
+                          <span>{Math.round(file.progress || 0)}%</span>
                         </div>
                         <div className="w-full bg-primary/20 rounded-full h-2">
                           <div 
                             className="bg-primary h-2 rounded-full transition-all duration-500 ease-out"
-                            style={{ width: `${getStageProgress(file.currentStage || 'queued', file.progress || 0)}%` }}
+                            style={{ width: `${file.progress || 0}%` }}
                           ></div>
                         </div>
                         <div className="mt-1 text-xs text-primary/50">
-                          {getStageDisplayName(file.currentStage || 'queued')} - {file.progress || 0}%
+                          {file.currentStage && file.currentStage !== 'queued' ? getStageDisplayName(file.currentStage) : 'Processing'} - {Math.round(file.progress || 0)}%
                         </div>
                       </div>
                     </div>
