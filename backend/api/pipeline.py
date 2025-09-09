@@ -19,7 +19,6 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from status import StatusManager
 from models import depth_from_hf, create_local_depth_map
 from video_io import probe_video
-
 def get_video_info(video_path: str) -> Dict[str, Any]:
     """Get video information using FFprobe"""
     try:
@@ -58,7 +57,7 @@ def get_video_info(video_path: str) -> Dict[str, Any]:
             "height": 1080
         }
 from inpaint_api import sd_inpaint
-from video_io import extract_frames, probe_video, create_side_by_side
+from video_io import extract_frames, create_side_by_side
 from flow_utils import compute_flow_cv2, warp_image_with_flow, interpolate_occlusion_aware, forward_backward_consistency_mask
 import math
 from pathlib import Path
@@ -481,7 +480,6 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
             
             # Get bitrate information for status
             try:
-                from video_io import probe_video
                 output_meta = probe_video(out_path)
                 bitrate = output_meta["format"].get("bit_rate", "N/A")
                 if bitrate != "N/A":
