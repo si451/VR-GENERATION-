@@ -431,7 +431,46 @@ async def create_side_by_side(left_dir: Path, right_dir: Path, out_path: Path, f
         raise RuntimeError(f"Original video not found: {original_video_path}")
     
     print(f"All inputs verified, running FFmpeg...")
-    await run_cmd(cmd)
+    
+    # First, test FFmpeg version and capabilities
+    try:
+        version_cmd = f"{FFMPEG_BIN} -version"
+        print(f"Testing FFmpeg version: {version_cmd}")
+        version_result = await run_cmd(version_cmd)
+        print(f"FFmpeg version output: {version_result[0][:200]}...")
+    except Exception as e:
+        print(f"FFmpeg version check failed: {e}")
+    
+    # Check available filters
+    try:
+        filters_cmd = f"{FFMPEG_BIN} -filters"
+        print(f"Checking available filters: {filters_cmd}")
+        filters_result = await run_cmd(filters_cmd)
+        if "hstack" in filters_result[0]:
+            print("✅ hstack filter is available")
+        else:
+            print("❌ hstack filter is NOT available")
+            print("Available filters:", filters_result[0][:500])
+    except Exception as e:
+        print(f"Filter check failed: {e}")
+    
+    # Test a simpler command first
+    try:
+        test_cmd = f'{FFMPEG_BIN} -f lavfi -i testsrc=duration=1:size=320x240:rate=1 -t 1 "{out_path.parent}/test_output.mp4"'
+        print(f"Testing simple FFmpeg command: {test_cmd}")
+        await run_cmd(test_cmd)
+        print("Simple FFmpeg test passed")
+    except Exception as e:
+        print(f"Simple FFmpeg test failed: {e}")
+    
+    # Now try the actual command
+    try:
+        await run_cmd(cmd)
+    except Exception as e:
+        print(f"Main FFmpeg command failed: {e}")
+        # Try alternative approach
+        print("Trying alternative FFmpeg approach...")
+        await try_alternative_ffmpeg_command(left_dir, right_dir, out_path, fps, original_video_path)
     
     # Verify output video duration and get bitrate info
     try:
@@ -458,3 +497,180 @@ async def create_side_by_side(left_dir: Path, right_dir: Path, out_path: Path, f
         print(f"Could not verify output duration: {e}")
     
     print(f"Side-by-side video created: {out_path}")
+
+async def try_alternative_ffmpeg_command(left_dir: Path, right_dir: Path, out_path: Path, fps: float, original_video_path: Path):
+    """Alternative FFmpeg approach using simpler syntax"""
+    print("Trying alternative FFmpeg command...")
+    
+    # Method 1: Use concat filter instead of hstack
+    try:
+        alt_cmd = (f'{FFMPEG_BIN} -y '
+                   f'-framerate {fps} -i "{left_dir}/frame_%06d.png" '
+                   f'-framerate {fps} -i "{right_dir}/frame_%06d.png" '
+                   f'-i "{original_video_path}" '
+                   f'-filter_complex "[0][1]hstack[v]" '
+                   f'-map "[v]" -map 2:a? '
+                   f'-c:v libx264 -crf 18 -preset fast '
+                   f'-c:a aac -b:a 128k '
+                   f'-pix_fmt yuv420p '
+                   f'-shortest '
+                   f'"{out_path}"')
+        
+        print(f"Alternative command: {alt_cmd}")
+        await run_cmd(alt_cmd)
+        print("Alternative FFmpeg command succeeded!")
+        return
+        
+    except Exception as e:
+        print(f"Alternative method 1 failed: {e}")
+    
+    # Method 2: Use scale2ref and hstack separately
+    try:
+        alt_cmd2 = (f'{FFMPEG_BIN} -y '
+                    f'-framerate {fps} -i "{left_dir}/frame_%06d.png" '
+                    f'-framerate {fps} -i "{right_dir}/frame_%06d.png" '
+                    f'-i "{original_video_path}" '
+                    f'-filter_complex "[0:v][1:v]hstack=inputs=2[v]" '
+                    f'-map "[v]" -map 2:a? '
+                    f'-c:v libx264 -crf 20 -preset medium '
+                    f'-c:a aac -b:a 128k '
+                    f'-pix_fmt yuv420p '
+                    f'-shortest '
+                    f'"{out_path}"')
+        
+        print(f"Alternative command 2: {alt_cmd2}")
+        await run_cmd(alt_cmd2)
+        print("Alternative FFmpeg command 2 succeeded!")
+        return
+        
+    except Exception as e:
+        print(f"Alternative method 2 failed: {e}")
+    
+    # Method 3: Create individual videos first, then combine
+    try:
+        left_video = out_path.parent / "left_temp.mp4"
+        right_video = out_path.parent / "right_temp.mp4"
+        
+        # Create left video
+        left_cmd = (f'{FFMPEG_BIN} -y '
+                   f'-framerate {fps} -i "{left_dir}/frame_%06d.png" '
+                   f'-c:v libx264 -crf 20 -preset fast '
+                   f'-pix_fmt yuv420p '
+                   f'"{left_video}"')
+        
+        # Create right video  
+        right_cmd = (f'{FFMPEG_BIN} -y '
+                    f'-framerate {fps} -i "{right_dir}/frame_%06d.png" '
+                    f'-c:v libx264 -crf 20 -preset fast '
+                    f'-pix_fmt yuv420p '
+                    f'"{right_video}"')
+        
+        print("Creating individual videos...")
+        await run_cmd(left_cmd)
+        await run_cmd(right_cmd)
+        
+        # Combine videos
+        combine_cmd = (f'{FFMPEG_BIN} -y '
+                      f'-i "{left_video}" '
+                      f'-i "{right_video}" '
+                      f'-i "{original_video_path}" '
+                      f'-filter_complex "[0:v][1:v]hstack[v]" '
+                      f'-map "[v]" -map 2:a? '
+                      f'-c:v libx264 -crf 20 -preset fast '
+                      f'-c:a aac -b:a 128k '
+                      f'-pix_fmt yuv420p '
+                      f'-shortest '
+                      f'"{out_path}"')
+        
+        print("Combining videos...")
+        await run_cmd(combine_cmd)
+        
+        # Clean up temp files
+        if left_video.exists():
+            left_video.unlink()
+        if right_video.exists():
+            right_video.unlink()
+            
+        print("Alternative FFmpeg command 3 succeeded!")
+        return
+        
+    except Exception as e:
+        print(f"Alternative method 3 failed: {e}")
+    
+    # Method 4: Use Python to combine images (fallback)
+    try:
+        print("Trying Python-based image combination...")
+        await combine_images_python(left_dir, right_dir, out_path, fps, original_video_path)
+        print("Python-based combination succeeded!")
+        return
+        
+    except Exception as e:
+        print(f"Python-based method failed: {e}")
+        raise RuntimeError(f"All FFmpeg methods failed. Last error: {e}")
+
+async def combine_images_python(left_dir: Path, right_dir: Path, out_path: Path, fps: float, original_video_path: Path):
+    """Fallback method using Python to combine images"""
+    from PIL import Image
+    import tempfile
+    
+    print("Using Python to combine images...")
+    
+    # Get frame files
+    left_frames = sorted(left_dir.glob("frame_*.png"))
+    right_frames = sorted(right_dir.glob("frame_*.png"))
+    
+    if not left_frames or not right_frames:
+        raise RuntimeError("No frame files found")
+    
+    # Create combined frames directory
+    combined_dir = out_path.parent / "combined_frames"
+    combined_dir.mkdir(exist_ok=True)
+    
+    print(f"Combining {len(left_frames)} frame pairs...")
+    
+    # Combine frames
+    for i, (left_frame, right_frame) in enumerate(zip(left_frames, right_frames)):
+        try:
+            # Load images
+            left_img = Image.open(left_frame)
+            right_img = Image.open(right_frame)
+            
+            # Ensure same height
+            if left_img.height != right_img.height:
+                height = min(left_img.height, right_img.height)
+                left_img = left_img.resize((int(left_img.width * height / left_img.height), height))
+                right_img = right_img.resize((int(right_img.width * height / right_img.height), height))
+            
+            # Create combined image
+            combined_width = left_img.width + right_img.width
+            combined_height = left_img.height
+            combined_img = Image.new('RGB', (combined_width, combined_height))
+            
+            # Paste images side by side
+            combined_img.paste(left_img, (0, 0))
+            combined_img.paste(right_img, (left_img.width, 0))
+            
+            # Save combined frame
+            combined_img.save(combined_dir / f"frame_{i:06d}.png")
+            
+        except Exception as e:
+            print(f"Error combining frame {i}: {e}")
+            continue
+    
+    # Create video from combined frames
+    video_cmd = (f'{FFMPEG_BIN} -y '
+                f'-framerate {fps} -i "{combined_dir}/frame_%06d.png" '
+                f'-i "{original_video_path}" '
+                f'-c:v libx264 -crf 20 -preset fast '
+                f'-c:a aac -b:a 128k '
+                f'-pix_fmt yuv420p '
+                f'-shortest '
+                f'"{out_path}"')
+    
+    print("Creating video from combined frames...")
+    await run_cmd(video_cmd)
+    
+    # Clean up combined frames
+    import shutil
+    if combined_dir.exists():
+        shutil.rmtree(combined_dir)
