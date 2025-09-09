@@ -572,6 +572,45 @@ async def download_options(job_id: str):
     response.headers["Accept-Ranges"] = "bytes"
     return response
 
+@app.delete("/delete/{job_id}")
+async def delete_job(job_id: str):
+    """Delete a job and all its associated files from the server"""
+    import shutil
+    
+    job_dir = WORKSPACE_DIR / job_id
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    try:
+        # Remove the entire job directory and all its contents
+        shutil.rmtree(job_dir)
+        print(f"✅ Deleted job directory: {job_dir}")
+        
+        # Also remove from status manager if possible
+        try:
+            status_mgr.delete(job_id)
+        except:
+            pass  # Status manager might not have delete method
+        
+        return {
+            "success": True,
+            "message": f"Job {job_id} and all associated files deleted successfully"
+        }
+    except Exception as e:
+        print(f"❌ Error deleting job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete job: {str(e)}")
+
+@app.options("/delete/{job_id}")
+async def delete_options(job_id: str):
+    from fastapi.responses import Response
+    
+    response = Response()
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+    response.headers["Access-Control-Max-Age"] = "86400"
+    return response
+
 @app.websocket("/ws/{job_id}")
 async def ws_job(websocket: WebSocket, job_id: str):
     await websocket.accept()

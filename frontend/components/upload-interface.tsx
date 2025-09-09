@@ -377,17 +377,85 @@ export function UploadInterface() {
     }
   }, [])
 
-  const removeFile = useCallback((fileId: string) => {
+  const removeFile = useCallback(async (fileId: string) => {
+    // Find the file to get jobId
+    const fileToDelete = files.find(f => f.id === fileId)
+    
     // Clear polling if it exists
     const cleanup = intervalsRef.current.get(fileId)
     if (cleanup) {
       cleanup() // Call cleanup function
       intervalsRef.current.delete(fileId)
     }
+    
+    // If file has a jobId, delete from server
+    if (fileToDelete?.jobId) {
+      try {
+        console.log(`Deleting job ${fileToDelete.jobId} from server...`)
+        const response = await fetch(`${API_BASE_URL}/delete/${fileToDelete.jobId}`, {
+          method: 'DELETE',
+          headers: {
+            'Accept': 'application/json',
+          },
+        })
+        
+        if (response.ok) {
+          console.log(`✅ Successfully deleted job ${fileToDelete.jobId} from server`)
+          toast({
+            title: "File Deleted",
+            description: `${fileToDelete.name} has been removed from the server.`,
+            duration: 3000,
+          })
+        } else {
+          console.error(`Failed to delete job ${fileToDelete.jobId} from server:`, response.status)
+          toast({
+            title: "Server Deletion Failed",
+            description: `File removed from frontend but may still exist on server.`,
+            variant: "destructive",
+            duration: 5000,
+          })
+        }
+      } catch (error) {
+        console.error('Error deleting from server:', error)
+        toast({
+          title: "Server Deletion Failed",
+          description: `File removed from frontend but may still exist on server.`,
+          variant: "destructive",
+          duration: 5000,
+        })
+      }
+    }
+    
+    // Remove from frontend state
     setFiles((prev) => prev.filter((file) => file.id !== fileId))
-  }, [])
+  }, [files, toast])
 
-  const clearCompletedFiles = useCallback(() => {
+  const clearCompletedFiles = useCallback(async () => {
+    const completedFiles = files.filter(f => f.status === "completed")
+    
+    // Delete completed files from server
+    for (const file of completedFiles) {
+      if (file.jobId) {
+        try {
+          console.log(`Deleting completed job ${file.jobId} from server...`)
+          const response = await fetch(`${API_BASE_URL}/delete/${file.jobId}`, {
+            method: 'DELETE',
+            headers: {
+              'Accept': 'application/json',
+            },
+          })
+          
+          if (response.ok) {
+            console.log(`✅ Successfully deleted completed job ${file.jobId} from server`)
+          } else {
+            console.error(`Failed to delete completed job ${file.jobId} from server:`, response.status)
+          }
+        } catch (error) {
+          console.error('Error deleting completed file from server:', error)
+        }
+      }
+    }
+    
     setFiles((prev) => {
       const remaining = prev.filter(f => f.status !== "completed")
       // Clear polling for completed files
@@ -400,14 +468,53 @@ export function UploadInterface() {
       })
       return remaining
     })
-  }, [])
+    
+    if (completedFiles.length > 0) {
+      toast({
+        title: "Completed Files Cleared",
+        description: `${completedFiles.length} completed files have been removed from the server.`,
+        duration: 3000,
+      })
+    }
+  }, [files, toast])
 
-  const clearAllFiles = useCallback(() => {
+  const clearAllFiles = useCallback(async () => {
+    // Delete all files from server
+    for (const file of files) {
+      if (file.jobId) {
+        try {
+          console.log(`Deleting job ${file.jobId} from server...`)
+          const response = await fetch(`${API_BASE_URL}/delete/${file.jobId}`, {
+            method: 'DELETE',
+            headers: {
+              'Accept': 'application/json',
+            },
+          })
+          
+          if (response.ok) {
+            console.log(`✅ Successfully deleted job ${file.jobId} from server`)
+          } else {
+            console.error(`Failed to delete job ${file.jobId} from server:`, response.status)
+          }
+        } catch (error) {
+          console.error('Error deleting file from server:', error)
+        }
+      }
+    }
+    
     setFiles([])
     // Clear all polling
     intervalsRef.current.forEach((cleanup) => cleanup())
     intervalsRef.current.clear()
-  }, [])
+    
+    if (files.length > 0) {
+      toast({
+        title: "All Files Cleared",
+        description: `${files.length} files have been removed from the server.`,
+        duration: 3000,
+      })
+    }
+  }, [files, toast])
 
   // Cleanup polling on unmount
   useEffect(() => {
