@@ -471,24 +471,59 @@ async def process_job(job_id: str, input_path: Path, use_inpaint_sd: bool = True
     print(f"Using {len(left_frames)} frames at {fps:.3f} fps")
     print(f"Target duration: {len(left_frames) / fps:.3f}s")
     
-    await create_side_by_side(left_dir, right_dir, out_path, fps, input_path)
-    
-    # Verify the output file was created successfully
-    if out_path.exists():
-        file_size = out_path.stat().st_size
-        print(f"Output video created: {out_path} ({file_size / (1024*1024):.1f} MB)")
-    else:
-        print(f"Output video was not created!")
-    
-    # Stage 4: Final Encoding - END
-    status_mgr.update(job_id, {
-        "status":"done", 
-        "stage":"finished", 
-        "percent":100, 
-        "output": str(out_path), 
-        "message": "Video processing completed successfully!",
-        "stage_completed": True
-    })
+    try:
+        await create_side_by_side(left_dir, right_dir, out_path, fps, input_path)
+        
+        # Verify the output file was created successfully
+        if out_path.exists():
+            file_size = out_path.stat().st_size
+            print(f"Output video created: {out_path} ({file_size / (1024*1024):.1f} MB)")
+            
+            # Get bitrate information for status
+            try:
+                from video_io import probe_video
+                output_meta = probe_video(out_path)
+                bitrate = output_meta["format"].get("bit_rate", "N/A")
+                if bitrate != "N/A":
+                    bitrate_mbps = int(bitrate) / 1000000
+                    bitrate_info = f"{bitrate_mbps:.2f} Mbps"
+                else:
+                    bitrate_info = "N/A"
+            except:
+                bitrate_info = "N/A"
+            
+            # Stage 4: Final Encoding - SUCCESS
+            status_mgr.update(job_id, {
+                "status":"done", 
+                "stage":"finished", 
+                "percent":100, 
+                "output": str(out_path), 
+                "message": "Video processing completed successfully!",
+                "bitrate": bitrate_info,
+                "file_size_mb": round(file_size / (1024*1024), 1),
+                "stage_completed": True
+            })
+        else:
+            print(f"Output video was not created!")
+            status_mgr.update(job_id, {
+                "status":"failed", 
+                "stage":"encode", 
+                "percent":95, 
+                "message": "Failed to create output video file",
+                "stage_completed": True
+            })
+            
+    except Exception as e:
+        print(f"❌ Final encoding failed: {e}")
+        import traceback
+        traceback.print_exc()
+        status_mgr.update(job_id, {
+            "status":"failed", 
+            "stage":"encode", 
+            "percent":95, 
+            "message": f"Final encoding failed: {str(e)}",
+            "stage_completed": True
+        })
 
 # Parallel processing functions removed - using sequential disk-based processing
 

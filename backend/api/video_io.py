@@ -433,11 +433,19 @@ async def create_side_by_side(left_dir: Path, right_dir: Path, out_path: Path, f
     print(f"All inputs verified, running FFmpeg...")
     await run_cmd(cmd)
     
-    # Verify output video duration
+    # Verify output video duration and get bitrate info
     try:
         output_meta = probe_video(out_path)
         output_duration = float(output_meta["format"].get("duration", 0.0))
         duration_diff = abs(output_duration - exact_duration)
+        
+        # Get bitrate information
+        bitrate = output_meta["format"].get("bit_rate", "N/A")
+        if bitrate != "N/A":
+            bitrate_mbps = int(bitrate) / 1000000
+            print(f"Output bitrate: {bitrate_mbps:.2f} Mbps")
+        else:
+            print(f"Output bitrate: N/A")
         
         print(f"Output duration: {output_duration:.3f}s (target: {exact_duration:.3f}s)")
         

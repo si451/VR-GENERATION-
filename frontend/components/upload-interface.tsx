@@ -23,6 +23,8 @@ interface UploadedFile {
   errorMessage?: string
   currentStage?: string
   stageMessage?: string
+  bitrate?: string
+  fileSizeMb?: number
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://213.163.196.177'
@@ -222,6 +224,8 @@ export function UploadInterface() {
                     errorMessage: status.message || status.error_message,
                     currentStage: status.stage || status.current_stage,
                     stageMessage: status.message || status.stage_message,
+                    bitrate: status.bitrate,
+                    fileSizeMb: status.file_size_mb,
                   }
                 }
                 return f
@@ -320,6 +324,8 @@ export function UploadInterface() {
                   errorMessage: status.message || status.error_message,
                   currentStage: status.stage || status.current_stage,
                   stageMessage: status.message || status.stage_message,
+                  bitrate: status.bitrate,
+                  fileSizeMb: status.file_size_mb,
                 }
               }
               return f
@@ -660,8 +666,18 @@ export function UploadInterface() {
                   </div>
 
                   <div className="flex items-center justify-between text-base text-gray-300 mb-4 font-semibold">
-                    <span>{formatFileSize(file.size)}</span>
-                    <span className="text-primary">{Math.round(file.progress)}%</span>
+                    <div className="flex flex-col gap-1">
+                      <span>{formatFileSize(file.size)}</span>
+                      {file.status === "completed" && file.fileSizeMb && (
+                        <span className="text-sm text-green-400">Output: {file.fileSizeMb} MB</span>
+                      )}
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="text-primary">{Math.round(file.progress)}%</span>
+                      {file.status === "completed" && file.bitrate && (
+                        <span className="text-sm text-green-400">{file.bitrate}</span>
+                      )}
+                    </div>
                   </div>
 
                   <Progress value={file.progress} className="h-4 bg-white/10 rounded-full" />
